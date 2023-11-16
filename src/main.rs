@@ -1,345 +1,19 @@
 extern crate pathdiff;
-use imgui::{FontId, FontConfig, ProgressBar};
-use serde::{Deserialize, Serialize};
-use std::{time::{Instant, Duration}, process::{Command, Stdio}, path::{Path, PathBuf}, fs::{File, self}, io::BufReader, thread, collections::HashMap, alloc::System};
-use rfd::FileDialog;
-use glow::{HasContext, ALWAYS};
-use glutin::{event_loop::EventLoop, WindowedContext};
+use application::{App, AssetType};
+use glam::{Mat4, Vec3, Vec2};
+use imgui::{FontConfig, Selectable};
+use renderer::{ShaderProgram, Sprite};
+use std::time::Instant;
+use glow::HasContext;
+use glutin::{event_loop::EventLoop, WindowedContext, dpi, event::{ElementState, KeyboardInput, VirtualKeyCode}};
 use imgui_winit_support::WinitPlatform;
+
+mod renderer;
+mod application;
 
 const TITLE: &str = "Lilah Editor";
 
 type Window = WindowedContext<glutin::PossiblyCurrent>;
-
-const CARGO_REPLACE: &'static str = "[dependencies]\nlilah = { git = \"https://github.com/dollerama/lilah.git\" }\nrusttype = \"*\"";
-const MAIN_REPLACE: &'static str = r#"
-    use lilah::application::*;
-    use lilah::math::Vec2;
-    use lilah::world::*;
-
-    fn setup(app : &mut App, state : &mut WorldState, scripting : &mut Scripting) {
-
-//ASSETS
-    }
-
-    pub fn main() {  
-        let mut app = App::new("Lilah", Vec2::new(800.0, 600.0));
-        let mut scripting = Scripting::new();
-
-        World::new()
-            .setup(Box::new(setup))
-        .run(&mut app, &mut scripting);  
-    }
-"#;
-
-#[derive(Serialize, Deserialize, Debug)]
-enum AssetType {
-    Script,
-    Texture,
-    Sfx,
-    Music,
-    Font
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-enum LoadType {
-    External, 
-    Emdedded,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Asset {
-    path: String,
-    type_of: AssetType,
-    load_type: LoadType
-}
-
-#[derive(Serialize, Deserialize)]
-struct Config {
-    pub assets: HashMap<String, Asset>
-}
-
-impl Config {
-    fn new() -> Self {
-        Self { assets: HashMap::new() }
-    }
-}
-
-struct App {
-    config: Config,
-    current_project: String
-}
-
-impl App {
-    fn new() -> Self {
-        Self {
-            config: Config::new(),
-            current_project: String::from("")
-        }
-    }
-
-    fn new_project(&mut self) -> &str {
-        if let Some(file) = FileDialog::new()
-        .set_directory("/")
-        .save_file() {
-            Command::new( "cargo" )
-            .args(["new", file.as_path().to_str().unwrap().clone()])
-            .spawn( )
-            .unwrap( ); 
-
-            self.current_project = file.as_path().to_str().unwrap().to_string();
-
-            while fs::read_to_string(format!("{}/Cargo.toml", self.current_project)).is_err() {
-                thread::sleep(Duration::from_millis(10));
-            }
-
-            let cargo_file = fs::read_to_string(format!("{}/Cargo.toml", self.current_project)).unwrap();
-            let _ = fs::write(
-                format!("{}/Cargo.toml", self.current_project),
-                cargo_file.replace("[dependencies]", CARGO_REPLACE)
-            );
-
-            let _ = fs::write(format!("{}/src/main.rs", self.current_project), MAIN_REPLACE);
-            let _ = fs::create_dir(format!("{}/assets", self.current_project));
-            let _ = fs::create_dir(format!("{}/src/scripts", self.current_project));
-            let _ = fs::create_dir(format!("{}/src/assets", self.current_project));
-
-            let _ = fs::write(
-                format!("{}/config.json", 
-                self.current_project).as_str(), 
-                serde_json::to_string(&self.config).unwrap()
-            );
-        }
-
-        &self.current_project
-    }
-
-    fn open_project(&mut self) -> &str {
-        if let Some(file) = FileDialog::new()
-        .set_directory("/")
-        .pick_folder() {
-            self.current_project = file.as_path().to_str().unwrap().to_string();
-
-            match fs::read(format!("{}/config.json", self.current_project).as_str()) {
-                Ok(v) => {
-                    self.config = serde_json::from_slice(&v).unwrap();
-                }
-                Err(_) => {
-                    let _ = fs::write(
-                        format!("{}/config.json", 
-                        self.current_project).as_str(), 
-                        serde_json::to_string(&self.config).unwrap()
-                    );
-                }
-            }
-        }
-
-        &self.current_project
-    }
-
-    fn wrangle_main(&self) {
-        let mut assets_str = String::from("");
-        for asset in &self.config.assets {
-            match asset.1.type_of {
-                AssetType::Script => {
-                    match asset.1.load_type {
-                        LoadType::Emdedded => {
-                            assets_str.push_str(
-                                format!("\t\tembed_script!(\"{}\", scripting);\n", 
-                                asset.1.path).as_str()
-                            )
-                        }
-                        LoadType::External => {
-                            panic!("Script cannot be external");
-                        }
-                    }
-                }
-                AssetType::Texture => {
-                    match asset.1.load_type {
-                        LoadType::Emdedded => {
-                            assets_str.push_str(
-                                format!("\t\tembed_texture!(\"{}\", state, app);\n", 
-                                asset.1.path).as_str()
-                            )
-                        }
-                        LoadType::External => {
-                            assets_str.push_str(
-                                format!("\t\tload_texture!(\"{}\", state, app);\n", 
-                                asset.1.path).as_str()
-                            )
-                        }
-                    }
-                }
-                AssetType::Sfx => {
-                    match asset.1.load_type {
-                        LoadType::Emdedded => {
-                            assets_str.push_str(
-                                format!("\t\tembed_sfx!(\"{}\", state);\n", 
-                                asset.1.path).as_str()
-                            )
-                        }
-                        LoadType::External => {
-                            assets_str.push_str(
-                                format!("\t\tload_sfx!(\"{}\", state);\n", 
-                                asset.1.path).as_str()
-                            )
-                        }
-                    }
-                }
-                AssetType::Music => {
-                    match asset.1.load_type {
-                        LoadType::Emdedded => {
-                            assets_str.push_str(
-                                format!("\t\tembed_music!(\"{}\", state);\n", 
-                                asset.1.path).as_str()
-                            )
-                        }
-                        LoadType::External => {
-                            assets_str.push_str(
-                                format!("\t\tload_music!(\"{}\", state);\n", 
-                                asset.1.path).as_str()
-                            )
-                        }
-                    }
-                }
-                AssetType::Font => {
-                    match asset.1.load_type {
-                        LoadType::Emdedded => {
-                            assets_str.push_str(
-                                format!("\t\tembed_font!(\"{}\", state);\n", 
-                                asset.1.path).as_str()
-                            )
-                        }
-                        LoadType::External => {
-                            panic!("Script cannot be external");
-                        }
-                    }
-                }
-            }
-        }
-        
-        let _ = fs::write(format!("{}/src/main.rs", self.current_project), MAIN_REPLACE);
-        let main_file = fs::read_to_string(format!("{}/src/main.rs", self.current_project)).unwrap();
-        let _ = fs::write(
-            format!("{}/src/main.rs", self.current_project), 
-            main_file.replace("//ASSETS", &assets_str)
-        );
-
-        while fs::read_to_string(format!("{}/src/main.rs", self.current_project)).is_err() {
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-
-    fn run_project(&mut self) {
-        self.wrangle_main();
-
-        let status = Command::new( "cargo" )
-        .args(["run", "--manifest-path", format!("{}/Cargo.toml", self.current_project).as_str()])
-        .spawn().expect("failed");
-    }
-
-    fn add_external_asset(&mut self) {
-        if let Some(files) = FileDialog::new()
-        .set_directory(format!("{}", self.current_project))
-        .add_filter("Type", &["png", "wav", "mp3"])
-        .pick_files() {
-            for file in &files {
-                let type_of = match file.extension().unwrap().to_str() {
-                    Some("wren") => {
-                        return;
-                    }
-                    Some("png") => {
-                        AssetType::Texture
-                    }
-                    Some("wav") => {
-                        AssetType::Sfx
-                    }
-                    Some("mp3") => {
-                        AssetType::Music
-                    }
-                    Some("ttf") => {
-                        return;
-                    }
-                    Some(&_) => todo!(),
-                    None => todo!(),
-                };
-
-                let path_base = Path::new(&self.current_project);
-                let file_path_str = file.as_path().to_str().unwrap();
-                let path = Path::new(file_path_str);
-                let relative_path_to = pathdiff::diff_paths(path, path_base);
-
-                let a =
-                Asset {
-                    path: relative_path_to.expect("Path").as_path().to_str().unwrap().to_string(),
-                    type_of: type_of,
-                    load_type: LoadType::Emdedded
-                };
-
-
-                self.config.assets.insert(file.file_name().unwrap().to_str().unwrap().to_string(), a);
-
-                let _ = fs::write(
-                    format!("{}/config.json", 
-                    self.current_project).as_str(), 
-                    serde_json::to_string(&self.config).unwrap()
-                );
-            }
-        }
-    }
-
-    fn add_embedded_asset(&mut self) {
-        if let Some(files) = FileDialog::new()
-        .set_directory(format!("{}", self.current_project))
-        .add_filter("Type", &["png", "wav", "mp3", "wren", "ttf"])
-        .pick_files() {
-            for file in &files {
-                let type_of = match file.extension().unwrap().to_str() {
-                    Some("wren") => {
-                        AssetType::Script
-                    }
-                    Some("png") => {
-                        AssetType::Texture
-                    }
-                    Some("wav") => {
-                        AssetType::Sfx
-                    }
-                    Some("mp3") => {
-                        AssetType::Music
-                    }
-                    Some("ttf") => {
-                        AssetType::Font
-                    }
-                    Some(&_) => todo!(),
-                    None => todo!(),
-                };
-
-                let script_base = format!("{}/src", self.current_project);
-                let path_base = Path::new(&self.current_project);
-                let path_base_from_src = Path::new(&script_base);
-                let file_path_str = file.as_path().to_str().unwrap();
-                let path = Path::new(file_path_str);
-                let relative_path_to = pathdiff::diff_paths(path, path_base_from_src);
-
-                let a =
-                Asset {
-                    path: relative_path_to.expect("Path").as_path().to_str().unwrap().to_string(),
-                    type_of: type_of,
-                    load_type: LoadType::Emdedded
-                };
-
-
-                self.config.assets.insert(file.file_name().unwrap().to_str().unwrap().to_string(), a);
-
-                let _ = fs::write(
-                    format!("{}/config.json", 
-                    self.current_project).as_str(), 
-                    serde_json::to_string(&self.config).unwrap()
-                );
-            }
-        }
-    }
-}
 
 fn main() {
     let mut app = App::new();
@@ -350,9 +24,36 @@ fn main() {
     let gl = glow_context(&window);
 
     let mut ig_renderer = imgui_glow_renderer::AutoRenderer::initialize(gl, &mut imgui_context)
-        .expect("failed to create renderer");
+        .expect("failed to create renderer"); 
+
+    unsafe {
+        *crate::renderer::PROJECTION_MATRIX = 
+            Mat4::orthographic_rh_gl(
+                0.0, 
+                window.window().inner_size().to_logical(winit_platform.hidpi_factor()).width, 
+                0.0,
+                window.window().inner_size().to_logical(winit_platform.hidpi_factor()).height, 
+                1000.0, 
+                -1000.0
+            );
+        *crate::renderer::VIEW_MATRIX = 
+            Mat4::from_translation(Vec3::new(0.0, 0.0, 0.0));
+    }
+
+    unsafe {
+        ig_renderer.gl_context().enable(glow::BLEND);
+        ig_renderer.gl_context().blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+    }
 
     let mut last_frame = Instant::now();
+
+    let vert = unsafe { renderer::Shader::new(ig_renderer.gl_context(), crate::renderer::DEFAULT_VERT, glow::VERTEX_SHADER).unwrap() };
+    let frag = unsafe { renderer::Shader::new(ig_renderer.gl_context(), crate::renderer::DEFAULT_FRAG, glow::FRAGMENT_SHADER).unwrap() };
+    let program = unsafe { ShaderProgram::new(ig_renderer.gl_context(), &[vert, frag]).unwrap() };
+
+    let mut spr: Option<Sprite> = None;
+
+    let mut camera = Vec2::new(0.0, 0.0);
 
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -370,9 +71,19 @@ fn main() {
                 window.window().request_redraw();
             }
             glutin::event::Event::RedrawRequested(_) => {
+                let ui = imgui_context.frame();
+                let drag = ui.mouse_drag_delta_with_button(imgui::MouseButton::Left);
+                camera += Vec2::new(-drag[0], drag[1])*0.05;
+                unsafe {
+                    *crate::renderer::VIEW_MATRIX = 
+                    Mat4::from_translation(Vec3::new(-camera.x, -camera.y, 0.0));
+                }
+
                 unsafe { ig_renderer.gl_context().clear(glow::COLOR_BUFFER_BIT) };
 
-                let ui = imgui_context.frame();
+                if let Some(s) = &spr {
+                    s.draw(ig_renderer.gl_context(), &program, &app.textures);
+                }
                 
                 if let Some(main_menu) = ui.begin_main_menu_bar() {
                     if let Some(_) = ui.begin_menu("File") {
@@ -398,6 +109,21 @@ fn main() {
                                     }
                                 }
                             }
+                            if let Some(_) = ui.begin_menu("Entities") {
+                                if ui.menu_item("Sprite") {
+                                    spr = Some(Sprite::new(&app.get_tile_sheet()));
+                                    spr.as_mut().expect("Failed").load(ig_renderer.gl_context(), &program, &app.textures);
+                                    spr.as_mut().expect("Failed").position = Vec2::new(200.0,300.0);
+                                }
+                            }
+                        }
+                        if let Some(_) = ui.begin_menu("World") {
+                            if ui.menu_item("New") {
+                                app.new_scene();
+                            }
+                            if ui.menu_item("Open") {
+                                app.open_scene(ig_renderer.gl_context());
+                            }
                         }
                     }
                     main_menu.end();
@@ -405,18 +131,52 @@ fn main() {
                 
                 if app.current_project != "" {
                     ui.window("Assets")
-                    .size([800.0, 100.0], imgui::Condition::Always)
-                    .position([0.0, 500.0], imgui::Condition::Always)
+                    .size([window.window().inner_size().to_logical(winit_platform.hidpi_factor()).width, 150.0], imgui::Condition::FirstUseEver)
+                    .position([0.0, window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height as f32-150.0], imgui::Condition::FirstUseEver)
                     .always_vertical_scrollbar(true)
                     .build(|| {
-                        for asset in &app.config.assets {
-                            ui.text(format!("[{:#?}]{}", asset.1.type_of, asset.0));
-                            if ui.is_item_hovered() {
-                                ui.tooltip(|| {
-                                    ui.text_colored([1.0, 1.0, 1.0, 1.0], format!("{:#?}", asset.1.load_type));
-                                });
+                        if let Some(_) = ui.tab_bar("main") {
+                            if let Some(_) = ui.tab_item("Project") {
+                                let mut to_load = vec!();
+
+                                for asset in &app.config.assets {
+                                    if ui.selectable(format!("[{:#?}]{}", asset.1.type_of, asset.1.name)) {
+                                        if let AssetType::Texture = asset.1.type_of {
+                                            if app.current_scene != "" {
+                                                ui.open_popup(asset.0);
+                                            }
+                                        }
+                                    }
+
+                                    if let Some(_) = ui.begin_popup(asset.0) {
+                                        if ui.button("Add Tilesheet") {
+                                            println!("{}", asset.1.absolute_path);
+                                            to_load.push(asset.1.absolute_path.clone());
+                                            ui.close_current_popup();
+                                        }
+                                    }
+
+                                    if ui.is_item_hovered() {
+                                        ui.tooltip(|| {
+                                            ui.text_colored([1.0, 1.0, 1.0, 1.0], format!("{:#?}", asset.1.load_type))
+                                        });
+                                    }
+                                    ui.separator();
+                                }
+
+                                for load in &to_load {
+                                    app.add_texture(ig_renderer.gl_context(), load.to_string());
+                                }
                             }
-                            ui.separator();
+                            if app.current_scene != "" {
+                                if let Some(_) = ui.tab_item(format!("World > {}", app.current_scene)) {
+                                    for tex in &app.textures {
+                                        if ui.selectable(tex.0) {
+                                            app.current_tile_sheet = tex.0.to_string();
+                                        }
+                                    }
+                                }
+                            }
                         }
                     });
                 }
@@ -427,8 +187,16 @@ fn main() {
                 ig_renderer
                     .render(draw_data)
                     .expect("error rendering imgui");
-
+                
                 window.swap_buffers().unwrap();
+            }   
+            glutin::event::Event::WindowEvent {
+                event: glutin::event::WindowEvent::Resized(size),
+                ..
+            } => {
+                window.resize(size);
+                let logical_size: dpi::LogicalSize<f32> = size.to_logical(winit_platform.hidpi_factor());
+                imgui_context.io_mut().display_size = [logical_size.width, logical_size.height];
             }
             glutin::event::Event::WindowEvent {
                 event: glutin::event::WindowEvent::CloseRequested,
@@ -447,7 +215,8 @@ fn create_window() -> (EventLoop<()>, Window) {
     let event_loop = glutin::event_loop::EventLoop::new();
     let window = glutin::window::WindowBuilder::new()
         .with_title(TITLE)
-        .with_inner_size(glutin::dpi::LogicalSize::new(800, 600));
+        .with_resizable(true)
+        .with_inner_size(glutin::dpi::LogicalSize::new(1024, 960));
     let window = glutin::ContextBuilder::new()
         .with_vsync(true)
         .build_windowed(window, &event_loop)

@@ -16,4 +16,6 @@ rfd = "*"
 serde_json = "*"
 pathdiff = "*"
 serde = { version = "*", features = ["derive"] }
-
+thiserror = "1.0"
+glam = "*"
+lazy_mut = "*"
