@@ -1,9 +1,9 @@
 extern crate pathdiff;
-use application::{App, AssetType};
-use glam::{Mat4, Vec3, Vec2};
+use application::{App, AssetType, Tile};
+use glam::{Mat4, Vec3, Vec2, Quat};
 use imgui::{FontConfig, Selectable};
 use renderer::{ShaderProgram, Sprite};
-use std::time::Instant;
+use std::{time::Instant};
 use glow::HasContext;
 use glutin::{event_loop::EventLoop, WindowedContext, dpi, event::{ElementState, KeyboardInput, VirtualKeyCode}};
 use imgui_winit_support::WinitPlatform;
@@ -51,9 +51,9 @@ fn main() {
     let frag = unsafe { renderer::Shader::new(ig_renderer.gl_context(), crate::renderer::DEFAULT_FRAG, glow::FRAGMENT_SHADER).unwrap() };
     let program = unsafe { ShaderProgram::new(ig_renderer.gl_context(), &[vert, frag]).unwrap() };
 
-    let mut spr: Option<Sprite> = None;
-
     let mut camera = Vec2::new(0.0, 0.0);
+    let mut tile_count = [0, 0];
+    let mut current_tile = (0u32, 0u32);
 
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -71,8 +71,9 @@ fn main() {
                 window.window().request_redraw();
             }
             glutin::event::Event::RedrawRequested(_) => {
+                let mut ui_hovered: bool = false;
                 let ui = imgui_context.frame();
-                let drag = ui.mouse_drag_delta_with_button(imgui::MouseButton::Left);
+                let drag = ui.mouse_drag_delta_with_button(imgui::MouseButton::Right);
                 camera += Vec2::new(-drag[0], drag[1])*0.05;
                 unsafe {
                     *crate::renderer::VIEW_MATRIX = 
@@ -81,8 +82,8 @@ fn main() {
 
                 unsafe { ig_renderer.gl_context().clear(glow::COLOR_BUFFER_BIT) };
 
-                if let Some(s) = &spr {
-                    s.draw(ig_renderer.gl_context(), &program, &app.textures);
+                for spr in &app.sprite_buffer {
+                    spr.draw(ig_renderer.gl_context(), &program, &app.textures);
                 }
                 
                 if let Some(main_menu) = ui.begin_main_menu_bar() {
@@ -109,13 +110,6 @@ fn main() {
                                     }
                                 }
                             }
-                            if let Some(_) = ui.begin_menu("Entities") {
-                                if ui.menu_item("Sprite") {
-                                    spr = Some(Sprite::new(&app.get_tile_sheet()));
-                                    spr.as_mut().expect("Failed").load(ig_renderer.gl_context(), &program, &app.textures);
-                                    spr.as_mut().expect("Failed").position = Vec2::new(200.0,300.0);
-                                }
-                            }
                         }
                         if let Some(_) = ui.begin_menu("World") {
                             if ui.menu_item("New") {
@@ -126,32 +120,36 @@ fn main() {
                             }
                         }
                     }
+                    ui_hovered = ui.is_any_item_hovered();
                     main_menu.end();
                 }
                 
                 if app.current_project != "" {
                     ui.window("Assets")
-                    .size([window.window().inner_size().to_logical(winit_platform.hidpi_factor()).width, 150.0], imgui::Condition::FirstUseEver)
-                    .position([0.0, window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height as f32-150.0], imgui::Condition::FirstUseEver)
+                    .size([window.window().inner_size().to_logical(winit_platform.hidpi_factor()).width, 175.0], imgui::Condition::Always)
+                    .position([0.0, window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height as f32-175.0], imgui::Condition::Always)
                     .always_vertical_scrollbar(true)
+                    .resizable(false)
                     .build(|| {
+                        ui_hovered = ui.is_window_hovered();
                         if let Some(_) = ui.tab_bar("main") {
                             if let Some(_) = ui.tab_item("Project") {
                                 let mut to_load = vec!();
+                                //let mut to_load2 = vec!();
 
                                 for asset in &app.config.assets {
                                     if ui.selectable(format!("[{:#?}]{}", asset.1.type_of, asset.1.name)) {
                                         if let AssetType::Texture = asset.1.type_of {
-                                            if app.current_scene != "" {
+                                            if let Some(_) = app.current_scene {
                                                 ui.open_popup(asset.0);
                                             }
                                         }
                                     }
 
                                     if let Some(_) = ui.begin_popup(asset.0) {
+                                        ui.input_int2("Tile Count", &mut tile_count).build();
                                         if ui.button("Add Tilesheet") {
-                                            println!("{}", asset.1.absolute_path);
-                                            to_load.push(asset.1.absolute_path.clone());
+                                            to_load.push((asset.1.path.clone(), asset.1.absolute_path.clone()));
                                             ui.close_current_popup();
                                         }
                                     }
@@ -165,20 +163,115 @@ fn main() {
                                 }
 
                                 for load in &to_load {
-                                    app.add_texture(ig_renderer.gl_context(), load.to_string());
+                                    app.add_texture(
+                                        ig_renderer.gl_context(), 
+                                        load.0.to_string(),
+                                        load.1.to_string(), 
+                                        &tile_count
+                                    );
                                 }
                             }
-                            if app.current_scene != "" {
-                                if let Some(_) = ui.tab_item(format!("World > {}", app.current_scene)) {
-                                    for tex in &app.textures {
-                                        if ui.selectable(tex.0) {
-                                            app.current_tile_sheet = tex.0.to_string();
+                            if let Some(scene) = app.current_scene.as_ref() {
+                                if let Some(_) = ui.tab_item(format!("World > {}", scene.name)) {
+                                    if let Some(_) = ui.tab_bar("world") {
+                                        if let Some(_) = ui.tab_item("Tile Sheets") {
+                                            for tex in &app.textures {
+                                                if ui.selectable(tex.0) {
+                                                    app.current_tile_sheet = tex.0.to_string();
+                                                }
+                                            }
+                                        }
+                                        if let Some(_) = ui.tab_item("Tiles") {
+                                            if let Some(scene) = app.current_scene.as_ref() {
+                                                let sheet = scene.tile_sheets.iter()
+                                                    .find(|&a| a.path == app.get_tile_sheet());
+                                                
+                                                if let Some(sheet) = sheet {
+                                                    let tile_wh = sheet.get_num_of_tiles();
+
+                                                    for i in 0..tile_wh.0 {
+                                                        for j in 0..tile_wh.1 {
+                                                            if ui.selectable(format!("Tile - {}x{}", i, j).to_string()) {
+                                                                current_tile = (i as u32, j as u32);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     });
+                }
+
+                let new_tile = if let Some(scene) = app.current_scene.as_ref() {
+                    if ui.is_mouse_clicked(imgui::MouseButton::Left) && !ui_hovered {
+                        let mouse_pos = Vec2::from_slice(&ui.io().mouse_pos);
+
+                        let model = 
+                        Mat4::IDENTITY * 
+                        Mat4::from_scale_rotation_translation( 
+                            Vec3::new(1.0, 1.0, 1.0),
+                            Quat::from_rotation_z(0.0), 
+                            Vec3::new(mouse_pos.x, window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height-mouse_pos.y, 0.0)
+                        );
+
+                        let view = unsafe { *crate::renderer::VIEW_MATRIX };
+                        let projection = unsafe { *crate::renderer::PROJECTION_MATRIX };
+
+                        let mvp =  (model * view.inverse() * projection);
+                        let position = mvp.to_scale_rotation_translation().2;
+
+                        Some(position)
+                    } else {
+                        None
+                    }
+                }
+                else {
+                    None
+                };
+
+                if let Some(nt) = new_tile {
+                    let tile = if let Some(scene) = app.current_scene.as_ref() {
+                        let sheet = scene.tile_sheets.iter().find(|&a| a.path == app.get_tile_sheet());
+                        
+                        if let Some(sheet) = sheet {
+                            if !scene.tiles.contains_key(
+                            &(
+                                (sheet.tile_size.0 as f32 * f32::round(nt.x/sheet.tile_size.0 as f32)) as i32,
+                                (sheet.tile_size.1 as f32 * f32::round(nt.y/sheet.tile_size.1 as f32)) as i32)
+                            ) {
+                                let mut new_spr = Sprite::new(&app.current_tile_sheet);
+                                new_spr.load(ig_renderer.gl_context(), &program, &app.textures);
+                                new_spr.cut_sprite_sheet(0, 0, 3, 3);
+                                new_spr.anim_sprite_sheet(ig_renderer.gl_context(), &program, current_tile.0 as i32, current_tile.1 as i32);
+                                new_spr.position = Vec2::new(sheet.tile_size.0 as f32 * f32::round(nt.x/sheet.tile_size.0 as f32), sheet.tile_size.1 as f32 * f32::round(nt.y/sheet.tile_size.1 as f32));
+                                app.sprite_buffer.push(
+                                    new_spr
+                                );
+
+                                Some(Tile {
+                                    sheet: app.current_tile_sheet.clone(),
+                                    sheet_id: current_tile,
+                                    position: (sheet.tile_size.0 as f32 * f32::round(nt.x/sheet.tile_size.0 as f32), sheet.tile_size.1 as f32 * f32::round(nt.y/sheet.tile_size.1 as f32))
+                                })
+                            }
+                            else {
+                                None
+                            }
+                        }
+                        else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    if let (Some(scene), Some(tile)) = (app.current_scene.as_mut(), tile) {
+                        scene.tiles.insert((tile.position.0 as i32, tile.position.1 as i32), tile);
+                    }
                 }
 
                 winit_platform.prepare_render(ui, window.window());

@@ -8,7 +8,7 @@ use glow::{HasContext, ALWAYS, Shader};
 use glutin::{event_loop::EventLoop, WindowedContext, dpi::{self, PhysicalSize}};
 use imgui_winit_support::WinitPlatform;
 
-use crate::renderer::LilahTexture;
+use crate::renderer::{LilahTexture, Sprite};
 
 const CARGO_REPLACE: &'static str = "[dependencies]\nlilah = { git = \"https://github.com/dollerama/lilah.git\" }\nrusttype = \"*\"";
 const MAIN_REPLACE: &'static str = r#"
@@ -58,23 +58,41 @@ pub struct Asset {
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     pub assets: HashMap<String, Asset>,
-    pub scenes: HashMap<String, Scene>
 }
 
 impl Config {
     pub fn new() -> Self {
-        Self { assets: HashMap::new(), scenes: HashMap::new() }
+        Self { assets: HashMap::new() }
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct TileSheet {
+    pub path: String,
+    pub absolute_path: String,
+    pub tile_size: (u32, u32),
+    pub sheet_size: (u32, u32)
+}
+
+impl TileSheet {
+    pub fn get_num_of_tiles(&self) -> (u32, u32) {
+        (self.sheet_size.0/self.tile_size.0, self.sheet_size.1/self.tile_size.1) 
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Tile {
+    pub sheet: String,
+    pub sheet_id: (u32, u32),
+    pub position: (f32, f32)
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Scene {
     pub name: String,
     pub path: String,
-    pub tile_sheets: Vec<String>,
-    pub scene_size: (u32, u32),
-    pub tiles: Vec<(u32, u32)>,
-    pub tile_size: (u32, u32)
+    pub tile_sheets: Vec<TileSheet>,
+    pub tiles: HashMap<(i32, i32), Tile>
 }
 
 impl Scene {
@@ -83,9 +101,7 @@ impl Scene {
             name: name.to_string(),
             path: path.to_string(),
             tile_sheets: Vec::new(),
-            scene_size: (0, 0),
-            tiles: Vec::new(),
-            tile_size: (0, 0),
+            tiles: HashMap::new()
         }
     }
 }
@@ -95,7 +111,8 @@ pub struct App {
     pub current_project: String,
     pub textures: HashMap<String, LilahTexture>,
     pub current_tile_sheet: String,
-    pub current_scene: String,
+    pub current_scene: Option<Scene>,
+    pub sprite_buffer: Vec<Sprite>
 }
 
 impl App {
@@ -105,7 +122,8 @@ impl App {
             current_project: String::from(""),
             textures: HashMap::new(),
             current_tile_sheet: String::from(""),
-            current_scene: "".to_string(),  
+            current_scene: None,
+            sprite_buffer: Vec::new()
         }
     }
 
@@ -129,11 +147,28 @@ impl App {
             }
         }
 
-        let file = String::from(Path::new(file).file_name().unwrap().to_str().unwrap());
+        //let file = String::from(Path::new(file).file_name().unwrap().to_str().unwrap());
 
-        self.textures.insert(file, new_texture);
+        self.textures.insert(file.to_string(), new_texture);
     }
 
+    pub fn write_config(&self) {
+        let _ = fs::write(
+            format!("{}/config.json", 
+            self.current_project).as_str(), 
+            serde_json::to_string(&self.config).unwrap()
+        );
+    }
+
+    pub fn write_current_scene(&self) {
+        if let Some(scene) = self.current_scene.as_ref() {
+            let _ = fs::write(
+                format!("{}/{}", self.current_project, scene.path),
+                serde_json::to_string(&scene).unwrap()
+            );
+        }
+    }
+ 
     pub fn open_scene(&mut self, gl: &glow::Context ) {
         if let Some(file) = FileDialog::new()
         .set_directory(format!("{}", self.current_project))
@@ -142,15 +177,25 @@ impl App {
             let file_path_str = file.as_path().to_str().unwrap();
             let path = Path::new(file_path_str);
             let relative_path_to = pathdiff::diff_paths(path, path_base).unwrap();
+            let file_path = relative_path_to.as_path();
 
-            self.current_scene = relative_path_to.as_path().to_str().unwrap().to_string();
-
-            let mut to_load = vec!();
-            for i in &self.config.scenes[&self.current_scene].tile_sheets {
-                to_load.push(i.clone());
+            match fs::read(file) {
+                Ok(v) => {
+                    self.current_scene = Some(serde_json::from_slice(&v).unwrap());
+                }
+                Err(_) => {
+                }
             }
-            for i in to_load {
-                self.load_texture(gl, &i);
+
+            if let Some(scene) = self.current_scene.as_ref() {
+                let mut to_load = vec!();
+                for i in &scene.tile_sheets {
+                    to_load.push(i.path.clone());
+                }
+
+                for i in to_load {
+                    self.load_texture(gl, &i);
+                }
             }
         }
     }
@@ -175,14 +220,9 @@ impl App {
                 serde_json::to_string(&new_scene).unwrap()
             );
 
-            self.config.scenes.insert(format!("{}.json", file.as_path().to_str().unwrap()), new_scene);
-            self.current_scene = file_path.to_string();
+            self.current_scene = Some(new_scene);
 
-            let _ = fs::write(
-                format!("{}/config.json", 
-                self.current_project).as_str(), 
-                serde_json::to_string(&self.config).unwrap()
-            );
+            self.write_config();
         }
     }
 
@@ -212,11 +252,7 @@ impl App {
             let _ = fs::create_dir(format!("{}/src/scripts", self.current_project));
             let _ = fs::create_dir(format!("{}/src/assets", self.current_project));
 
-            let _ = fs::write(
-                format!("{}/config.json", 
-                self.current_project).as_str(), 
-                serde_json::to_string(&self.config).unwrap()
-            );
+            self.write_config();
         }
 
         &self.current_project
@@ -233,11 +269,7 @@ impl App {
                     self.config = serde_json::from_slice(&v).unwrap();
                 }
                 Err(_) => {
-                    let _ = fs::write(
-                        format!("{}/config.json", 
-                        self.current_project).as_str(), 
-                        serde_json::to_string(&self.config).unwrap()
-                    );
+                    self.write_config();
                 }
             }
         }
@@ -346,16 +378,24 @@ impl App {
         .spawn().expect("failed");
     }
 
-    pub fn add_texture(&mut self, gl: &glow::Context, path: String) {
+    pub fn add_texture(&mut self, gl: &glow::Context, abs_path: String, path: String, tile_count: &[i32; 2]) {
         self.load_texture(gl, &path);
 
-        self.config.scenes.get_mut(&self.current_scene).unwrap()
-            .tile_sheets.push(path);
+        let size = self.textures.get(&path).unwrap().size;
 
-        let _ = fs::write(
-            format!("{}.json",  self.config.scenes.get(&self.current_scene).unwrap().path),
-            serde_json::to_string(&self.config.scenes.get(&self.current_scene).unwrap()).unwrap()
-        );
+        if let Some(scene) = self.current_scene.as_mut() {
+            scene.tile_sheets.push(
+                TileSheet { 
+                    absolute_path: abs_path, 
+                    path: path,
+                    tile_size: ((size.x/tile_count[0] as f32) as u32, (size.y/tile_count[1] as f32) as u32), 
+                    sheet_size: (size.x as u32, size.y as u32) 
+                }
+            );
+        }
+
+        self.write_current_scene();
+        self.write_config();
     }
 
     pub fn add_external_asset(&mut self) {
@@ -401,11 +441,7 @@ impl App {
 
                 self.config.assets.insert(format!("{}_{:?}", a.path.clone(), LoadType::External), a);
 
-                let _ = fs::write(
-                    format!("{}/config.json", 
-                    self.current_project).as_str(), 
-                    serde_json::to_string(&self.config).unwrap()
-                );
+                self.write_config();
             }
         }
     }
@@ -454,11 +490,7 @@ impl App {
 
                 self.config.assets.insert(format!("{}_{:?}", a.path.clone(), LoadType::Emdedded), a);
 
-                let _ = fs::write(
-                    format!("{}/config.json", 
-                    self.current_project).as_str(), 
-                    serde_json::to_string(&self.config).unwrap()
-                );
+                self.write_config();
             }
         }
     }
