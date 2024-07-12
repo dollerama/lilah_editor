@@ -101,6 +101,7 @@ pub struct Layer {
     #[serde_as(as = "Vec<(_, _)>")]
     pub tiles: HashMap<(i32, i32), Tile>,
     pub visible: bool,
+    pub collision: bool,
     pub tile_sheet: String,
     pub current_tile_item: i32
 }
@@ -110,6 +111,7 @@ impl Layer {
         Self { 
             tiles: HashMap::new(),
             visible: true,
+            collision: false,
             tile_sheet: String::from(""),
             current_tile_item: 0
         }

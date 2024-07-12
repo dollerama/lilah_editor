@@ -206,6 +206,14 @@ fn main() {
                                                     ui.next_column();
                                                     ui.text(format!("{}", layer.tiles.keys().len()));
                                                     ui.next_column();
+                                                    ui.text("Collision");
+                                                    ui.next_column();
+                                                    if layer.collision {
+                                                        ui.checkbox("enabled", &mut layer.collision);
+                                                    } else {
+                                                        ui.checkbox("disabled", &mut layer.collision);
+                                                    }
+                                                    ui.next_column();
 
                                                     if let Some(_) = ui.begin_popup("TileSheetPopup") { 
                                                         let list = scene.tile_sheets.iter().map(|TileSheet { ref filename, .. }| filename.as_str()).collect::<Vec<&str>>();
