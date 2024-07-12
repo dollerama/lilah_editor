@@ -3,6 +3,7 @@ use std::{path::Path, ffi::{CString, NulError}, ptr, string::FromUtf8Error, coll
 use glam::{Vec2, Vec3, Quat, Mat4};
 use glow::{HasContext, ALWAYS, NativeTexture, NativeProgram};
 use image::{ImageError, EncodableLayout, DynamicImage, Rgba};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use lazy_mut::lazy_mut;
 
@@ -81,7 +82,7 @@ impl LilahTexture {
     pub unsafe fn set_filtering(&self, gl: &glow::Context, mode: i32) {
         self.bind(gl);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, mode);
-        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, mode);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::LINEAR_MIPMAP_LINEAR, mode);
     }
 
     pub unsafe fn bind(&self, gl: &glow::Context) {
@@ -310,6 +311,8 @@ pub struct Sprite {
     pub tint: Color,
 
     pub sort: u32,
+
+    pub visible: bool,
     
     vertex_buffer: Option<Buffer>,
     vertex_array: Option<VertexArray>
@@ -341,7 +344,8 @@ impl Sprite {
             vertex_array: None,
             vertex_buffer: None,
             tint: Color::WHITE,
-            sort: 0
+            sort: 0,
+            visible: true
         }
     }
 
@@ -390,9 +394,31 @@ impl Sprite {
 
     pub fn anim_sprite_sheet(&mut self, gl: &glow::Context, program: &ShaderProgram, ind: i32, ind2: i32) {
         self.index = (ind*self.get_size().0 as i32, ind2*self.get_size().1 as i32);
+        let ratio = (
+            ((self.base_size.0 as f32/self.size.0 as f32)/self.base_size.0 as f32),
+            ((self.base_size.1 as f32/self.size.1 as f32)/self.base_size.1 as f32)
+        );
 
-        let zero = ((ind as f32 + 0.5) /self.size.0 as f32, (ind2 as f32 + 0.5)/self.size.1 as f32);
-        let one = (zero.0+(self.size.0 as f32/self.base_size.0 as f32), zero.1+(self.size.1 as f32/self.base_size.1 as f32));
+        fn precision_f32(x: f32, decimals: u32) -> f32 {
+            if x == 0. || decimals == 0 {
+                0.
+            } else {
+                let shift = decimals as i32 - x.abs().log10().ceil() as i32;
+                let shift_factor = 10_f64.powi(shift) as f32;
+
+                (x * shift_factor).round() / shift_factor
+            }
+        }
+
+        let zero = (
+            precision_f32((ind as f32) / self.size.0 as f32 + (1.0/self.base_size.0 as f32), 2), 
+            precision_f32((ind2 as f32) / self.size.1 as f32 + (1.0/self.base_size.1 as f32), 2)
+        );
+
+        let one = (
+            precision_f32(zero.0+ratio.0 - (1.0/self.base_size.0 as f32) * 2.0, 2), 
+            precision_f32(zero.1+ratio.1 - (1.0/self.base_size.1 as f32) * 2.0, 2)
+        );
 
         let mut new_verts = Sprite::DEF_VERTICES;
         new_verts[0].1 = [zero.0, one.1];
@@ -407,6 +433,10 @@ impl Sprite {
     }
 
     pub fn draw(&self, gl: &glow::Context, program: &ShaderProgram, textures: &HashMap<String, LilahTexture>) {
+        if !self.visible {
+            return;
+        }
+
         let model = 
         Mat4::IDENTITY * 
         Mat4::from_scale_rotation_translation( 

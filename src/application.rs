@@ -1,5 +1,5 @@
 extern crate pathdiff;
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec3, Vec2};
 use imgui::{FontId, FontConfig, ProgressBar};
 use serde::{Deserialize, Serialize};
 use std::{time::{Instant, Duration}, process::{Command, Stdio}, path::{Path, PathBuf}, fs::{File, self}, io::BufReader, thread, collections::HashMap, alloc::System};
@@ -7,8 +7,9 @@ use rfd::FileDialog;
 use glow::{HasContext, ALWAYS, Shader};
 use glutin::{event_loop::EventLoop, WindowedContext, dpi::{self, PhysicalSize}};
 use imgui_winit_support::WinitPlatform;
+use serde_with::serde_as;
 
-use crate::renderer::{LilahTexture, Sprite};
+use crate::renderer::{LilahTexture, Sprite, ShaderProgram};
 
 const CARGO_REPLACE: &'static str = "[dependencies]\nlilah = { git = \"https://github.com/dollerama/lilah.git\" }\nrusttype = \"*\"";
 const MAIN_REPLACE: &'static str = r#"
@@ -30,6 +31,12 @@ const MAIN_REPLACE: &'static str = r#"
         .run(&mut app, &mut scripting);  
     }
 "#;
+
+pub enum PropertySelect {
+    None,
+    Layer,
+    Tilesheet(usize)
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum AssetType {
@@ -68,6 +75,7 @@ impl Config {
 
 #[derive(Serialize, Deserialize)]
 pub struct TileSheet {
+    pub filename: String,
     pub path: String,
     pub absolute_path: String,
     pub tile_size: (u32, u32),
@@ -87,12 +95,33 @@ pub struct Tile {
     pub position: (f32, f32)
 }
 
+#[serde_as]
+#[derive(Serialize, Deserialize)]
+pub struct Layer {
+    #[serde_as(as = "Vec<(_, _)>")]
+    pub tiles: HashMap<(i32, i32), Tile>,
+    pub visible: bool,
+    pub tile_sheet: String,
+    pub current_tile_item: i32
+}
+
+impl Layer {
+    pub fn new() -> Self {
+        Self { 
+            tiles: HashMap::new(),
+            visible: true,
+            tile_sheet: String::from(""),
+            current_tile_item: 0
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Scene {
     pub name: String,
     pub path: String,
     pub tile_sheets: Vec<TileSheet>,
-    pub tiles: HashMap<(i32, i32), Tile>
+    pub layers: Vec<Layer>
 }
 
 impl Scene {
@@ -101,7 +130,7 @@ impl Scene {
             name: name.to_string(),
             path: path.to_string(),
             tile_sheets: Vec::new(),
-            tiles: HashMap::new()
+            layers: Vec::new()
         }
     }
 }
@@ -112,7 +141,8 @@ pub struct App {
     pub textures: HashMap<String, LilahTexture>,
     pub current_tile_sheet: String,
     pub current_scene: Option<Scene>,
-    pub sprite_buffer: Vec<Sprite>
+    pub current_layer: usize,
+    pub sprite_buffer: Vec<HashMap<(i32, i32), Sprite>>
 }
 
 impl App {
@@ -123,7 +153,8 @@ impl App {
             textures: HashMap::new(),
             current_tile_sheet: String::from(""),
             current_scene: None,
-            sprite_buffer: Vec::new()
+            sprite_buffer: Vec::new(),
+            current_layer: 0
         }
     }
 
@@ -169,7 +200,7 @@ impl App {
         }
     }
  
-    pub fn open_scene(&mut self, gl: &glow::Context ) {
+    pub fn open_scene(&mut self, gl: &glow::Context, program: &ShaderProgram) {
         if let Some(file) = FileDialog::new()
         .set_directory(format!("{}", self.current_project))
         .pick_file() {
@@ -185,16 +216,45 @@ impl App {
                 }
                 Err(_) => {
                 }
-            }
+            } 
 
             if let Some(scene) = self.current_scene.as_ref() {
                 let mut to_load = vec!();
                 for i in &scene.tile_sheets {
                     to_load.push(i.path.clone());
                 }
-
                 for i in to_load {
                     self.load_texture(gl, &i);
+                }
+            }
+
+            if let Some(scene) = self.current_scene.as_ref() {
+                self.current_tile_sheet = scene.layers[0].tile_sheet.clone();
+
+                let mut tiles = vec!();
+                self.sprite_buffer.clear();
+                for j in scene.layers.iter().enumerate() {
+                    for i in &j.1.tiles {
+                        tiles.push((j.0, i.clone()));
+                    }
+                    self.sprite_buffer.push(HashMap::new());
+                }
+                
+                for i in tiles {
+                    let mut new_spr = Sprite::new(&i.1.1.sheet);
+                    new_spr.load(gl, &program, &self.textures);
+                    new_spr.cut_sprite_sheet(0, 0, 3, 3);
+                    new_spr.anim_sprite_sheet(
+                        gl, 
+                        &program,  
+                        i.1.1.sheet_id.0 as i32, i.1.1.sheet_id.1 as i32
+                    );
+                    new_spr.position = Vec2::new(
+                        i.1.0.0 as f32, 
+                        i.1.0.1 as f32
+                    );
+
+                    self.sprite_buffer[i.0].insert(* i.1.0, new_spr);
                 }
             }
         }
@@ -213,7 +273,9 @@ impl App {
             let file_name = relative_path_to.as_path().file_name().unwrap().to_str().unwrap();
             let file_path = relative_path_to.as_path().to_str().unwrap();
 
-            let new_scene = Scene::new(file_name, &format!("{}.json", file_path));
+            let mut new_scene = Scene::new(file_name, &format!("{}.json", file_path));
+            new_scene.layers.push(Layer::new());
+            self.sprite_buffer.push(HashMap::new());
 
             let _ = fs::write(
                 format!("{}.json", file.as_path().to_str().unwrap()),
@@ -383,9 +445,13 @@ impl App {
 
         let size = self.textures.get(&path).unwrap().size;
 
+        let filename_split = path.split("/").collect::<Vec<&str>>();
+        let filename = filename_split[filename_split.len()-1];
+
         if let Some(scene) = self.current_scene.as_mut() {
             scene.tile_sheets.push(
                 TileSheet { 
+                    filename: filename.to_string(),
                     absolute_path: abs_path, 
                     path: path,
                     tile_size: ((size.x/tile_count[0] as f32) as u32, (size.y/tile_count[1] as f32) as u32), 
