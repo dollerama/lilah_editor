@@ -23,7 +23,7 @@ const MAIN_REPLACE: &'static str = r#"
     }
 
     pub fn main() {  
-        let mut app = App::new("Lilah", Vec2::new(800.0, 600.0));
+        let mut app = App::new("Lilah", WINDOW_SIZE);
         let mut scripting = Scripting::new();
 
         World::new()
@@ -35,10 +35,11 @@ const MAIN_REPLACE: &'static str = r#"
 pub enum PropertySelect {
     None,
     Layer,
-    Tilesheet(usize)
+    Tilesheet(usize),
+    Script
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum AssetType {
     Script,
     Texture,
@@ -47,29 +48,31 @@ pub enum AssetType {
     Font
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum LoadType {
     External, 
     Emdedded,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Asset {
     pub name: String,
     pub path: String,
     pub absolute_path: String,
     pub type_of: AssetType,
-    pub load_type: LoadType
+    pub load_type: LoadType,
+    pub load_order: Option<usize>
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     pub assets: HashMap<String, Asset>,
+    pub window_size: (f32, f32)
 }
 
 impl Config {
     pub fn new() -> Self {
-        Self { assets: HashMap::new() }
+        Self { assets: HashMap::new(), window_size: (800f32, 600f32) }
     }
 }
 
@@ -343,15 +346,17 @@ impl App {
 
     pub fn wrangle_main(&self) {
         let mut assets_str = String::from("");
+        let mut sorted_scripts = vec!();
         for asset in &self.config.assets {
             match asset.1.type_of {
                 AssetType::Script => {
                     match asset.1.load_type {
                         LoadType::Emdedded => {
-                            assets_str.push_str(
-                                format!("\t\tembed_script!(\"{}\", scripting);\n", 
-                                asset.1.path).as_str()
-                            )
+                            // assets_str.push_str(
+                            //     format!("\t\tembed_script!(\"{}\", scripting);\n", 
+                            //     asset.1.path).as_str()
+                            // )
+                            sorted_scripts.push((asset.1.load_order.unwrap(), format!("\t\tembed_script!(\"{}\", scripting);\n", asset.1.path)));
                         }
                         LoadType::External => {
                             panic!("Script cannot be external");
@@ -421,12 +426,18 @@ impl App {
                 }
             }
         }
+
+        sorted_scripts.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for s in sorted_scripts {
+            assets_str.push_str(&s.1);
+        }
         
         let _ = fs::write(format!("{}/src/main.rs", self.current_project), MAIN_REPLACE);
         let main_file = fs::read_to_string(format!("{}/src/main.rs", self.current_project)).unwrap();
         let _ = fs::write(
             format!("{}/src/main.rs", self.current_project), 
-            main_file.replace("//ASSETS", &assets_str)
+            main_file.replace("//ASSETS", &assets_str).replace("WINDOW_SIZE", format!("Vec2.new({}, {})", self.config.window_size.0, self.config.window_size.1).as_str())
         );
 
         while fs::read_to_string(format!("{}/src/main.rs", self.current_project)).is_err() {
@@ -503,7 +514,8 @@ impl App {
                     path: relative_path_to.expect("Path").as_path().to_str().unwrap().to_string(),
                     absolute_path: file.as_os_str().to_str().unwrap().to_string(),
                     type_of: type_of,
-                    load_type: LoadType::External
+                    load_type: LoadType::External,
+                    load_order: None
                 };
 
 
@@ -541,11 +553,26 @@ impl App {
                 };
 
                 let script_base = format!("{}/src", self.current_project);
-                let path_base = Path::new(&self.current_project);
+                //let path_base = Path::new(&self.current_project);
                 let path_base_from_src = Path::new(&script_base);
                 let file_path_str = file.as_path().to_str().unwrap();
                 let path = Path::new(file_path_str);
                 let relative_path_to = pathdiff::diff_paths(path, path_base_from_src);
+
+                let mut order = -1;
+                if let AssetType::Script = type_of {
+                    order = 0;
+                    for i in &self.config.assets {
+                        if let AssetType::Script = i.1.type_of {
+                            order += 1;
+                        } 
+                    }
+                }
+                let order_to_use = if order == -1 {
+                    None
+                } else {
+                    Some(order as usize)
+                };
 
                 let a =
                 Asset {
@@ -553,7 +580,8 @@ impl App {
                     path: relative_path_to.expect("Path").as_path().to_str().unwrap().to_string(),
                     absolute_path: file.as_os_str().to_str().unwrap().to_string(),
                     type_of: type_of,
-                    load_type: LoadType::Emdedded
+                    load_type: LoadType::Emdedded,
+                    load_order: order_to_use
                 };
 
                 self.config.assets.insert(format!("{}_{:?}", a.path.clone(), LoadType::Emdedded), a);

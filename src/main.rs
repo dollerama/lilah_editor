@@ -1,7 +1,7 @@
 extern crate pathdiff;
 use application::{App, AssetType, Tile, Layer, TileSheet, PropertySelect};
 use glam::{Mat4, Vec3, Vec2, Quat};
-use imgui::{FontConfig, Selectable, TextureId};
+use imgui::{DragDropFlags, FontConfig, Selectable, TextureId};
 use renderer::{ShaderProgram, Sprite};
 use std::{time::Instant, collections::HashMap};
 use glow::HasContext;
@@ -68,6 +68,7 @@ fn main() {
 
     let mut camera = Vec2::new(0.0, 0.0);
     let mut tile_count = [0, 0];
+    let mut win_size = [800f32, 600f32];
     let mut current_tile = (0u32, 0u32);
     let mut property_select = PropertySelect::None;
 
@@ -110,7 +111,7 @@ fn main() {
                         spr.1.draw(ig_renderer.gl_context(), &program, &app.textures);
                     }
                 }
-                
+                let mut open_window_size = false;
                 if let Some(main_menu) = ui.begin_main_menu_bar() {
                     if let Some(_) = ui.begin_menu("File") {
                         if ui.menu_item("New") {
@@ -118,12 +119,24 @@ fn main() {
                         }
                         if ui.menu_item("Open") {
                             window.window().set_title(app.open_project());
+                            win_size = [app.config.window_size.0, app.config.window_size.1]; 
+                        }
+                        if app.current_project != "" {
+                            if ui.menu_item("Save") {
+                                app.wrangle_main();
+                                app.write_config();
+                            }
                         }
                     }
                     if app.current_project != "" {
                         if let Some(_) = ui.begin_menu("Project") {
                             if ui.menu_item("Run") {
                                 app.run_project();
+                            }
+                            if let Some(_) = ui.begin_menu("Settings") {
+                                if ui.menu_item("Window Size") {
+                                    open_window_size = true;
+                                }
                             }
                             if let Some(_) = ui.begin_menu("Assets") {
                                 if let Some(_) = ui.begin_menu("Add") {
@@ -143,243 +156,348 @@ fn main() {
                             if ui.menu_item("Open") {
                                 app.open_scene(ig_renderer.gl_context(), &program);
                             }
-                            if let Some(scene) = app.current_scene.as_ref() {
+                            if let Some(_) = app.current_scene.as_ref() {
                                 if ui.menu_item("Save") {
                                     app.write_current_scene();
                                 }
                             }
                         }
+                    } 
+
+                    if open_window_size {
+                        ui.open_popup("Window Size");
                     }
+
+                    if let Some(_) = ui.modal_popup_config("Window Size").always_auto_resize(true).begin_popup() {
+                        ui.input_float2("width : height", &mut win_size).build();
+
+                        ui.columns(2, "win_size_exit", false);
+                        if ui.button("Save") {
+                            app.config.window_size.0 = win_size[0];
+                            app.config.window_size.1 = win_size[1];
+                            ui.close_current_popup();
+                        }
+                        ui.next_column();
+                        if ui.button("Close") {
+                            win_size = [app.config.window_size.0, app.config.window_size.1]; 
+                            ui.close_current_popup();
+                        }
+                        ui.next_column();
+                    }
+                                    
                     main_menu.end();
                 }
                 
                 if app.current_project != "" {
-                    if let Some(_) = app.current_scene.as_ref() {
-                        ui.window("Properties")
-                        .size(
-                            [200.0, 
-                            window_size.1-175.0-20.0], imgui::Condition::Always
-                        )
-                        .position(
-                            [ window_size.0-200.0, 
-                            20.0], 
-                            imgui::Condition::Always
-                        )
-                        .resizable(false)
-                        .collapsible(false)
-                        .build(|| {
-                            match property_select {
-                                PropertySelect::None => {}
-                                PropertySelect::Tilesheet(sheet) => {
-                                    if let Some(_) = ui.tab_bar("prop_main") {
-                                        if let Some(_) = ui.tab_item("Tile Sheet") {
-                                            if let Some(scene) = app.current_scene.as_mut() {
-                                                if let Some(tilesheet) = scene.tile_sheets.get_mut(sheet) {
-                                                    if ui.input_int2("Tiles", &mut tile_count).build() {
-                                                        if tile_count[0] != 0 && tile_count[1] != 0 {
-                                                            tilesheet.tile_size = (
-                                                                tilesheet.sheet_size.0/tile_count[0] as u32, 
-                                                                tilesheet.sheet_size.1/tile_count[1] as u32
-                                                            );
-                                                        }
+                    ui.window("Properties")
+                    .size(
+                        [200.0, 
+                        window_size.1-175.0-20.0], imgui::Condition::Always
+                    )
+                    .position(
+                        [ window_size.0-200.0, 
+                        20.0], 
+                        imgui::Condition::Always
+                    )
+                    .resizable(false)
+                    .collapsible(false)
+                    .build(|| {
+                        match &property_select {
+                            PropertySelect::None => {}
+                            PropertySelect::Tilesheet(sheet) => {
+                                if let Some(_) = ui.tab_bar("prop_main") {
+                                    if let Some(_) = ui.tab_item("Tile Sheet") {
+                                        if let Some(scene) = app.current_scene.as_mut() {
+                                            if let Some(tilesheet) = scene.tile_sheets.get_mut(*sheet) {
+                                                if ui.input_int2("Tiles", &mut tile_count).build() {
+                                                    if tile_count[0] != 0 && tile_count[1] != 0 {
+                                                        tilesheet.tile_size = (
+                                                            tilesheet.sheet_size.0/tile_count[0] as u32, 
+                                                            tilesheet.sheet_size.1/tile_count[1] as u32
+                                                        );
                                                     }
                                                 }
                                             }
                                         }
                                     }
                                 }
-                                PropertySelect::Layer => {
-                                    if let Some(_) = ui.tab_bar("prop_main") {
-                                        if let Some(_) = ui.tab_item("Layer") {
-                                            if let Some(scene) = app.current_scene.as_mut() {
-                                                if let Some(layer) = scene.layers.get_mut(app.current_layer) {
-                                                    ui.columns(2, "Properties", true);
-                                                    ui.text("Tile Sheet");
-                                                    ui.next_column();
-                                                    if let Some(tilesheet) = scene.tile_sheets.get(layer.current_tile_item as usize) {
-                                                        if ui.button(&tilesheet.filename) {
-                                                            ui.open_popup("TileSheetPopup")
-                                                        }
+                            }
+                            PropertySelect::Layer => {
+                                if let Some(_) = ui.tab_bar("prop_main") {
+                                    if let Some(_) = ui.tab_item("Layer") {
+                                        if let Some(scene) = app.current_scene.as_mut() {
+                                            if let Some(layer) = scene.layers.get_mut(app.current_layer) {
+                                                ui.columns(2, "Properties", true);
+                                                ui.text("Tile Sheet");
+                                                ui.next_column();
+                                                if let Some(tilesheet) = scene.tile_sheets.get(layer.current_tile_item as usize) {
+                                                    if ui.button(&tilesheet.filename) {
+                                                        ui.open_popup("TileSheetPopup")
                                                     }
-                                                    ui.next_column();
-                                                    ui.text("Tile Count");
-                                                    ui.next_column();
-                                                    ui.text(format!("{}", layer.tiles.keys().len()));
-                                                    ui.next_column();
-                                                    ui.text("Collision");
-                                                    ui.next_column();
-                                                    if layer.collision {
-                                                        ui.checkbox("enabled", &mut layer.collision);
-                                                    } else {
-                                                        ui.checkbox("disabled", &mut layer.collision);
-                                                    }
-                                                    ui.next_column();
+                                                }
+                                                ui.next_column();
+                                                ui.text("Tile Count");
+                                                ui.next_column();
+                                                ui.text(format!("{}", layer.tiles.keys().len()));
+                                                ui.next_column();
+                                                ui.text("Collision");
+                                                ui.next_column();
+                                                if layer.collision {
+                                                    ui.checkbox("enabled", &mut layer.collision);
+                                                } else {
+                                                    ui.checkbox("disabled", &mut layer.collision);
+                                                }
+                                                ui.next_column();
 
-                                                    if let Some(_) = ui.begin_popup("TileSheetPopup") { 
-                                                        let list = scene.tile_sheets.iter().map(|TileSheet { ref filename, .. }| filename.as_str()).collect::<Vec<&str>>();
-                                                        let list2 = scene.tile_sheets.iter().map(|TileSheet { ref path, .. }| path.as_str()).collect::<Vec<&str>>();
-                                                        if ui.list_box("Tile Sheet", &mut layer.current_tile_item, list.as_slice(), list.len() as i32) {
-                                                            layer.tile_sheet = list2[layer.current_tile_item as usize].to_string();
-                                                            app.current_tile_sheet = list2[layer.current_tile_item as usize].to_string();
-                                                            println!("{}", app.current_tile_sheet);
-
-                                                            for j in &mut layer.tiles {
-                                                                if let Some(buffer) = app.sprite_buffer.get_mut(app.current_layer) {
-                                                                    if let Some(spr) = buffer.get_mut(
-                                                                        j.0
-                                                                    ) {
-                                                                        spr.texture_id = list2[layer.current_tile_item as usize].to_string();
-                                                                    }
+                                                if let Some(_) = ui.begin_popup("TileSheetPopup") { 
+                                                    let list = scene.tile_sheets.iter().map(|TileSheet { ref filename, .. }| filename.as_str()).collect::<Vec<&str>>();
+                                                    let list2 = scene.tile_sheets.iter().map(|TileSheet { ref path, .. }| path.as_str()).collect::<Vec<&str>>();
+                                                    if ui.list_box("Tile Sheet", &mut layer.current_tile_item, list.as_slice(), list.len() as i32) {
+                                                        layer.tile_sheet = list2[layer.current_tile_item as usize].to_string();
+                                                        app.current_tile_sheet = list2[layer.current_tile_item as usize].to_string();
+                                                        for j in &mut layer.tiles {
+                                                            if let Some(buffer) = app.sprite_buffer.get_mut(app.current_layer) {
+                                                                if let Some(spr) = buffer.get_mut(
+                                                                    j.0
+                                                                ) {
+                                                                    spr.texture_id = list2[layer.current_tile_item as usize].to_string();
                                                                 }
-                                                            } 
-                                                            ui.close_current_popup();
-                                                        }
+                                                            }
+                                                            j.1.sheet = layer.tile_sheet.clone(); 
+                                                        } 
+                                                        ui.close_current_popup();
                                                     }
                                                 }
                                             }
                                         }
-                                        if let Some(_) = ui.tab_item("Tiles") {
-                                            if let Some(scene) = app.current_scene.as_ref() {
-                                                let sheet = scene.tile_sheets.iter()
-                                                    .find(|&a| a.path == app.get_tile_sheet());
+                                    }
+                                    if let Some(_) = ui.tab_item("Tiles") {
+                                        if let Some(scene) = app.current_scene.as_ref() {
+                                            let sheet = scene.tile_sheets.iter()
+                                                .find(|&a| a.path == app.get_tile_sheet());
+                                            
+                                            if let Some(sheet) = sheet {
+                                                let tile_wh = sheet.get_num_of_tiles();
                                                 
-                                                if let Some(sheet) = sheet {
-                                                    let tile_wh = sheet.get_num_of_tiles();
-                                                    
-                                                    ui.columns(tile_wh.0 as i32, "tile_cols", false);
-                                                    for i in 0..tile_wh.1 {
-                                                        for j in 0..tile_wh.0 {
-                                                            if ui.selectable(format!("{}x{}", j, i).to_string()) {
-                                                                current_tile = (j as u32, i as u32);
-                                                            }
+                                                ui.columns(tile_wh.0 as i32, "tile_cols", false);
+                                                for i in 0..tile_wh.1 {
+                                                    for j in 0..tile_wh.0 {
+                                                        if ui.selectable(format!("{}x{}", j, i).to_string()) {
+                                                            current_tile = (j as u32, i as u32);
+                                                        }
 
-                                                            ui.invisible_button("mock_btn_for_tile_img", [25.0, 25.0]);
-                                                            let min = ui.item_rect_min();
-                                                            let max = ui.item_rect_max();
+                                                        ui.invisible_button("mock_btn_for_tile_img", [25.0, 25.0]);
+                                                        let min = ui.item_rect_min();
+                                                        let max = ui.item_rect_max();
 
-                                                            let ratio = (
-                                                                ((sheet.sheet_size.0 as f32/tile_wh.0 as f32)/sheet.sheet_size.0 as f32),
-                                                                ((sheet.sheet_size.1 as f32/tile_wh.1 as f32)/sheet.sheet_size.1 as f32),
-                                                            );
+                                                        let ratio = (
+                                                            ((sheet.sheet_size.0 as f32/tile_wh.0 as f32)/sheet.sheet_size.0 as f32),
+                                                            ((sheet.sheet_size.1 as f32/tile_wh.1 as f32)/sheet.sheet_size.1 as f32),
+                                                        );
 
-                                                            fn precision_f32(x: f32, decimals: u32) -> f32 {
-                                                                if x == 0. || decimals == 0 {
-                                                                    0.
-                                                                } else {
-                                                                    let shift = decimals as i32 - x.abs().log10().ceil() as i32;
-                                                                    let shift_factor = 10_f64.powi(shift) as f32;
+                                                        fn precision_f32(x: f32, decimals: u32) -> f32 {
+                                                            if x == 0. || decimals == 0 {
+                                                                0.
+                                                            } else {
+                                                                let shift = decimals as i32 - x.abs().log10().ceil() as i32;
+                                                                let shift_factor = 10_f64.powi(shift) as f32;
 
-                                                                    (x * shift_factor).round() / shift_factor
-                                                                }
-                                                            }
-
-                                                            let zero = (
-                                                                precision_f32((j as f32) / tile_wh.0 as f32 + (1.0/sheet.sheet_size.0 as f32), 2), 
-                                                                precision_f32((i as f32) / tile_wh.1 as f32 + (1.0/sheet.sheet_size.1 as f32), 2)
-                                                            );
-
-                                                            let one = (
-                                                                precision_f32(zero.0+ratio.0 - (1.0/sheet.sheet_size.0 as f32) * 2.0, 2), 
-                                                                precision_f32(zero.1+ratio.1 - (1.0/sheet.sheet_size.1 as f32) * 2.0, 2)
-                                                            );
-
-                                                            let new_verts =
-                                                            [[zero.0, zero.1],
-                                                            [one.0, zero.1],
-                                                            [one.0, one.1],
-                                                            [zero.0, one.1]];
-                                                            let draw_list = ui.get_window_draw_list();
-                                                            draw_list 
-                                                            .add_image_quad(TextureId::new(u32::from(app.textures[&app.current_tile_sheet].id.0) as usize),
-                                                            [min[0], min[1]], [max[0], min[1]], [max[0], max[1]], [min[0], max[1]])
-                                                            .uv(new_verts[0], new_verts[1], new_verts[2], new_verts[3])
-                                                            .build();
-
-                                                            if j != tile_wh.0-1 {
-                                                                 ui.next_column();
+                                                                (x * shift_factor).round() / shift_factor
                                                             }
                                                         }
-                                                        ui.next_column();
+
+                                                        let zero = (
+                                                            precision_f32((j as f32) / tile_wh.0 as f32 + (1.0/sheet.sheet_size.0 as f32), 2), 
+                                                            precision_f32((i as f32) / tile_wh.1 as f32 + (1.0/sheet.sheet_size.1 as f32), 2)
+                                                        );
+
+                                                        let one = (
+                                                            precision_f32(zero.0+ratio.0 - (1.0/sheet.sheet_size.0 as f32) * 2.0, 2), 
+                                                            precision_f32(zero.1+ratio.1 - (1.0/sheet.sheet_size.1 as f32) * 2.0, 2)
+                                                        );
+
+                                                        let new_verts =
+                                                        [[zero.0, zero.1],
+                                                        [one.0, zero.1],
+                                                        [one.0, one.1],
+                                                        [zero.0, one.1]];
+                                                        let draw_list = ui.get_window_draw_list();
+                                                        draw_list 
+                                                        .add_image_quad(TextureId::new(u32::from(app.textures[&app.current_tile_sheet].id.0) as usize),
+                                                        [min[0], min[1]], [max[0], min[1]], [max[0], max[1]], [min[0], max[1]])
+                                                        .uv(new_verts[0], new_verts[1], new_verts[2], new_verts[3])
+                                                        .build();
+
+                                                        if j != tile_wh.0-1 {
+                                                                ui.next_column();
+                                                        }
                                                     }
+                                                    ui.next_column();
                                                 }
                                             }
                                         }
                                     }
                                 }
                             }
-                        });
+                            PropertySelect::Script => {
+                                let mut sorted_scripts = vec!();
+                                for ass in &app.config.assets {
+                                    if let AssetType::Script = ass.1.type_of {
+                                        sorted_scripts.push((ass.1.name.clone(), ass.1.load_order.unwrap()));
+                                    }
+                                }
+                                sorted_scripts.sort_by(|a, b| a.1.cmp(&b.1));
+                                //ui.columns(2, "Properties", true);
+                                let mut a = -1;
+                                let mut b = -1;
+                                for ass in sorted_scripts {
+                                    ui.selectable(ass.0.clone());
 
-                        ui.window("Hierarchy")
-                        .size(
-                            [175.0, 
-                            window_size.1-175.0-20.0], imgui::Condition::Always
-                        )
-                        .position(
-                            [0.0, 
-                            20.0], 
-                            imgui::Condition::Always
-                        )
-                        .resizable(false)
-                        .collapsible(false)
-                        .build(|| {
-                            if let Some(_) = ui.tab_bar("main") {
-                                if let Some(_) = ui.tab_item("Layers") {
-                                    if let Some(scene) = app.current_scene.as_mut() {
-                                        if ui.button("Add") {
-                                            let mut new_layer = Layer::new();
-                                            new_layer.tile_sheet = app.current_tile_sheet.clone();
-                                            scene.layers.push(new_layer);
-                                            app.sprite_buffer.push(HashMap::new());
+                                    if let Some(tip) = ui.drag_drop_source_config("drag").begin_payload(ass.1) {
+                                        ui.text(ass.0.clone());
+                                        tip.end();
+                                    }
+
+                                    if let Some(target) = ui.drag_drop_target() {
+                                        if let Some(Ok(payload_data)) = target
+                                            .accept_payload::<usize, _>("drag", DragDropFlags::empty())
+                                        {
+                                            a = ass.1 as i32;
+                                            b = payload_data.data as i32;
                                         }
-
-                                        ui.columns(3, "layers_column", false);
-                                        for i in scene.layers.iter_mut().enumerate() {
-                                            if i.0 == app.current_layer {
-                                                ui.bullet();
+                                        target.pop();
+                                    }
+                                }
+                                if a != -1 && b != -1 {
+                                    let mut aa_temp = None;
+                                    for i in &app.config.assets {
+                                        if let AssetType::Script = i.1.type_of {
+                                            if let Some(lo) = i.1.load_order {
+                                                if lo == a as usize {
+                                                    aa_temp = Some(lo);
+                                                }
                                             }
-                                            ui.next_column();
-                                            if ui.selectable(format!("Layer {}", i.0)) {
-                                                property_select = PropertySelect::Layer;
-                                                app.current_layer = i.0;
-                                                app.current_tile_sheet = i.1.tile_sheet.clone();
-                                                for j in &mut i.1.tiles {
-                                                    if let Some(buffer) = app.sprite_buffer.get_mut(i.0) {
-                                                        if let Some(spr) = buffer.get_mut(
-                                                            j.0
-                                                        ) {
-                                                            spr.texture_id = i.1.tile_sheet.clone();
-                                                        }
-                                                    }
-                                                } 
-                                            }
-                                            ui.next_column();
-                                            let button_label = if i.1.visible {
-                                                format!("Hide {}", i.0)
-                                            }
-                                            else {
-                                                format!("Show {}", i.0)
-                                            };
-
-                                            if ui.button(button_label) {
-                                                i.1.visible = !i.1.visible;
-
-                                                for j in &mut i.1.tiles {
-                                                    if let Some(buffer) = app.sprite_buffer.get_mut(i.0) {
-                                                        if let Some(spr) = buffer.get_mut(
-                                                            j.0
-                                                        ) {
-                                                            spr.visible = i.1.visible;
-                                                        }
-                                                    }
-                                                }   
-                                            }
-                                            ui.next_column();
                                         }
+                                    }
+
+                                    let mut bb_temp = None;
+                                    for i in &app.config.assets {
+                                        if let AssetType::Script = i.1.type_of {
+                                            if let Some(lo) = i.1.load_order {
+                                                if lo == b as usize {
+                                                    bb_temp = Some(lo);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    let mut bb= None;
+                                    for i in &mut app.config.assets {
+                                        if let AssetType::Script = i.1.type_of {
+                                            if let Some(lo) = i.1.load_order {
+                                                if lo == b as usize {
+                                                    bb = Some(i.1);
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    match bb {
+                                        Some(bbb) => bbb.load_order = aa_temp,
+                                        None => { }
+                                    }
+
+                                    let mut aa = None;
+                                    for i in &mut app.config.assets {
+                                        if let AssetType::Script = i.1.type_of {
+                                            if let Some(lo) = i.1.load_order {
+                                                if lo == a as usize {
+                                                    aa = Some(i.1);
+                                                }
+                                            } 
+                                        }
+                                    }
+
+                                    match aa {
+                                        Some(aaa) => aaa.load_order = bb_temp,
+                                        None => { }
                                     }
                                 }
                             }
-                        });
-                    }
+                       }
+                    });
+
+                    ui.window("Hierarchy")
+                    .size(
+                        [175.0, 
+                        window_size.1-175.0-20.0], imgui::Condition::Always
+                    )
+                    .position(
+                        [0.0, 
+                        20.0], 
+                        imgui::Condition::Always
+                    )
+                    .resizable(false)
+                    .collapsible(false)
+                    .build(|| {
+                        if let Some(_) = ui.tab_bar("main") {
+                            if let Some(_) = ui.tab_item("Layers") {
+                                if let Some(scene) = app.current_scene.as_mut() {
+                                    if ui.button("Add") {
+                                        let mut new_layer = Layer::new();
+                                        new_layer.tile_sheet = app.current_tile_sheet.clone();
+                                        scene.layers.push(new_layer);
+                                        app.sprite_buffer.push(HashMap::new());
+                                    }
+
+                                    ui.columns(3, "layers_column", false);
+                                    for i in scene.layers.iter_mut().enumerate() {
+                                        if i.0 == app.current_layer {
+                                            ui.bullet();
+                                        }
+                                        ui.next_column();
+                                        if ui.selectable(format!("Layer {}", i.0)) {
+                                            property_select = PropertySelect::Layer;
+                                            app.current_layer = i.0;
+                                            app.current_tile_sheet = i.1.tile_sheet.clone();
+                                            for j in &mut i.1.tiles {
+                                                if let Some(buffer) = app.sprite_buffer.get_mut(i.0) {
+                                                    if let Some(spr) = buffer.get_mut(
+                                                        j.0
+                                                    ) {
+                                                        spr.texture_id = i.1.tile_sheet.clone();
+                                                    }
+                                                }
+                                                j.1.sheet = app.current_tile_sheet.clone();
+                                            } 
+                                        }
+                                        ui.next_column();
+                                        let button_label = if i.1.visible {
+                                            format!("Hide {}", i.0)
+                                        }
+                                        else {
+                                            format!("Show {}", i.0)
+                                        };
+
+                                        if ui.button(button_label) {
+                                            i.1.visible = !i.1.visible;
+
+                                            for j in &mut i.1.tiles {
+                                                if let Some(buffer) = app.sprite_buffer.get_mut(i.0) {
+                                                    if let Some(spr) = buffer.get_mut(
+                                                        j.0
+                                                    ) {
+                                                        spr.visible = i.1.visible;
+                                                    }
+                                                }
+                                            }   
+                                        }
+                                        ui.next_column();
+                                    }
+                                }
+                            }
+                        }
+                    });
                     ui.window("Assets")
                     .size(
                         [window_size.0, 
@@ -407,6 +525,8 @@ fn main() {
                                             if let Some(_) = app.current_scene {
                                                 ui.open_popup(asset.0);
                                             }
+                                        } else if let AssetType::Script = asset.1.type_of {
+                                            property_select = PropertySelect::Script;
                                         }
                                     }
                                     ui.next_column();
@@ -425,7 +545,7 @@ fn main() {
                                         }
                                     }
 
-                                    if ui.button("Remove") {
+                                    if ui.button(format!("Remove##{}", asset.0.clone())) {
                                         to_remove.push(asset.0.clone());
                                     }
 
