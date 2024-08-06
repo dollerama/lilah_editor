@@ -2,7 +2,7 @@ extern crate pathdiff;
 use application::{App, AssetType, Tile, Layer, TileSheet, PropertySelect};
 use glam::{Mat4, Vec3, Vec2, Quat};
 use imgui::{DragDropFlags, FontConfig, Selectable, TextureId};
-use renderer::{ShaderProgram, Sprite};
+use renderer::{Line, ShaderProgram, Sprite};
 use std::{time::Instant, collections::HashMap};
 use glow::HasContext;
 use glutin::{event_loop::EventLoop, WindowedContext, dpi, event::{ElementState, KeyboardInput, VirtualKeyCode}};
@@ -66,6 +66,23 @@ fn main() {
         ShaderProgram::new(ig_renderer.gl_context(), &shaders).unwrap()
     };
 
+    let line_program = unsafe { 
+        let shaders = [
+            renderer::Shader::new(
+                ig_renderer.gl_context(), 
+                crate::renderer::LINE_VERT, 
+                glow::VERTEX_SHADER
+            ).unwrap(), 
+            renderer::Shader::new(
+                ig_renderer.gl_context(), 
+                crate::renderer::Line_FRAG, 
+                glow::FRAGMENT_SHADER
+            ).unwrap() 
+        ];
+
+        ShaderProgram::new(ig_renderer.gl_context(), &shaders).unwrap()
+    };
+
     let mut camera = Vec2::new(0.0, 0.0);
     let mut tile_count = [0, 0];
     let mut win_size = [800f32, 600f32];
@@ -97,10 +114,12 @@ fn main() {
                 
                 if ui.is_key_down(imgui::Key::Space) {
                     let drag = ui.mouse_drag_delta_with_button(imgui::MouseButton::Left);
-                    camera += Vec2::new(-drag[0], drag[1])*0.05;
-                    unsafe {
-                        *crate::renderer::VIEW_MATRIX = 
-                        Mat4::from_translation(Vec3::new(-camera.x, -camera.y, 0.0));
+                    if Vec2::new(-drag[0], drag[1]).length() > 0.5f32 {
+                        camera += Vec2::new(-drag[0], drag[1])*0.05;
+                        unsafe {
+                            *crate::renderer::VIEW_MATRIX = 
+                            Mat4::from_translation(Vec3::new(-camera.x, -camera.y, 0.0));
+                        }
                     }
                 }
 
@@ -111,6 +130,39 @@ fn main() {
                         spr.1.draw(ig_renderer.gl_context(), &program, &app.textures);
                     }
                 }
+
+                if let Some(scene) = app.current_scene.as_ref() {
+                    let sheet = scene.tile_sheets.iter()
+                        .find(|&a| a.path == app.get_tile_sheet());
+
+                    if let Some(sheet) = sheet {
+                        let size = sheet.tile_size;
+
+                        let offset = Vec2::new(camera.x.round_ties_even().rem_euclid(size.0 as f32), camera.y.round_ties_even().rem_euclid(size.1 as f32));
+                        
+                        let w =  window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).width.abs() / size.0 as f32;
+                        let h =  (window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height.abs() / size.1 as f32) + 2.0;
+
+                        for i in 0..(w as i32) {
+                            Line::draw(
+                                ig_renderer.gl_context(), 
+                                &line_program, 
+                                Vec2::new( size.0 as f32 * i as f32, -(size.1 as f32)) - offset,
+                                Vec2::new( size.0 as f32 * i as f32, h * size.1 as f32) - offset
+                            );
+                        }
+
+                        for i in 0..(h as i32) {
+                            Line::draw(
+                                ig_renderer.gl_context(), 
+                                &line_program, 
+                                Vec2::new(-(size.0 as f32), size.1 as f32 * i as f32) - offset,
+                                Vec2::new(w * size.0 as f32, size.1 as f32 * i as f32) - offset
+                            );
+                        }
+                    }
+                }
+
                 let mut open_window_size = false;
                 if let Some(main_menu) = ui.begin_main_menu_bar() {
                     if let Some(_) = ui.begin_menu("File") {
@@ -473,10 +525,10 @@ fn main() {
                                         }
                                         ui.next_column();
                                         let button_label = if i.1.visible {
-                                            format!("Hide {}", i.0)
+                                            format!("Hide##{}", i.0)
                                         }
                                         else {
-                                            format!("Show {}", i.0)
+                                            format!("Show##{}", i.0)
                                         };
 
                                         if ui.button(button_label) {
@@ -602,7 +654,21 @@ fn main() {
                 }
 
                 let new_tile = if let Some(_) = app.current_scene.as_ref() {
-                    let mouse_pos = Vec2::from_slice(&ui.io().mouse_pos);
+                    let tile_size = if let Some(scene) = app.current_scene.as_ref() {
+                        let sheet = scene.tile_sheets.iter().find(
+                            |&a| a.path == app.get_tile_sheet()
+                        );
+                            
+                        if let Some(sheet) = sheet {
+                            Vec2::new(sheet.tile_size.0 as f32/2.0, sheet.tile_size.1 as f32/2.0)
+                        } else {
+                            Vec2::new(0.0, 0.0)
+                        }
+                    } else {
+                        Vec2::new(0.0, 0.0)
+                    };
+
+                    let mouse_pos = Vec2::from_slice(&ui.io().mouse_pos)-tile_size;
 
                     let model = 
                     Mat4::IDENTITY * 
@@ -647,7 +713,7 @@ fn main() {
                             if nt.1 {
                                 let mut new_spr = Sprite::new(&app.current_tile_sheet);
                                 new_spr.load(ig_renderer.gl_context(), &program, &app.textures);
-                                new_spr.cut_sprite_sheet(0, 0, 3, 3);
+                                new_spr.cut_sprite_sheet(0, 0,sheet.get_num_of_tiles().0, sheet.get_num_of_tiles().1);
                                 new_spr.anim_sprite_sheet(
                                     ig_renderer.gl_context(), 
                                     &program, 

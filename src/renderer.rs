@@ -41,6 +41,26 @@ void main() {
 }
 "#;
 
+pub const LINE_VERT: &'static str = r#"
+#version 330
+in vec2 position;
+
+uniform mat4 mvp;
+
+void main() {
+    gl_Position = mvp * vec4(position, 0.0, 1.0);
+}
+"#;
+
+pub const Line_FRAG: &'static str = r#"
+#version 330
+out vec4 FragColor;
+
+void main() {
+   FragColor = vec4(1.0, 1.0, 1.0, 0.25);
+}
+"#;
+
 
 #[derive(Clone)]
 pub struct LilahTexture {
@@ -465,5 +485,49 @@ impl Sprite {
             
             gl.draw_elements(glow::TRIANGLES, 6, glow::UNSIGNED_INT, 0);
         }
+    }
+}
+
+pub struct Line {}
+
+impl Line {
+    pub fn draw(gl: &glow::Context, program: &ShaderProgram, start: Vec2, end: Vec2) {
+        //let view = unsafe { *crate::renderer::VIEW_MATRIX };
+        let projection = unsafe { *crate::renderer::PROJECTION_MATRIX };
+
+        let mvp = projection * Mat4::IDENTITY;
+
+        let (mut vao , mut vbo, mut ibo) = unsafe {
+            let vao = VertexArray::new(gl);
+            vao.bind(gl);
+
+            let vbo = Buffer::new(gl, glow::ARRAY_BUFFER);
+            vbo.set_data(gl, &[Vertex([start.x as f32, start.y as f32],  [0 as f32, 0 as f32]), Vertex([end.x as f32, end.y as f32],  [1 as f32, 0 as f32])], glow::STATIC_DRAW);
+
+            let mut ibo = Buffer::new(gl, glow::ELEMENT_ARRAY_BUFFER);
+            ibo.set_data(gl, &[0, 1], glow::DYNAMIC_DRAW);
+
+            let pos_attrib = program.get_attrib_location(gl, "position").unwrap();
+            set_attribute!(gl, vao, pos_attrib, Vertex::0, glow::FLOAT);
+
+            
+
+            (vao, vbo, ibo)
+        };
+        
+        unsafe {
+            program.apply(gl);
+            
+            vao.bind(gl);
+            
+            let mat_attr = gl.get_uniform_location(program.id, "mvp").unwrap();
+            gl.uniform_matrix_4_f32_slice(Some(&mat_attr), false,  &mvp.to_cols_array());
+            
+            gl.draw_elements(glow::LINES, 6, glow::UNSIGNED_INT, 0);
+        }
+
+        vao.delete(gl);
+        vbo.delete(gl);
+        ibo.delete(gl);
     }
 }
