@@ -1,5 +1,5 @@
 extern crate pathdiff;
-use application::{App, AssetType, Tile, Layer, TileSheet, PropertySelect};
+use application::{App, AssetType, Layer, Marker, PropertySelect, Tile, TileSheet};
 use glam::{Mat4, Vec3, Vec2, Quat};
 use imgui::{DragDropFlags, FontConfig, Selectable, TextureId};
 use renderer::{Line, ShaderProgram, Sprite};
@@ -14,6 +14,13 @@ mod application;
 const TITLE: &str = "Lilah Editor";
 
 type Window = WindowedContext<glutin::PossiblyCurrent>;
+
+fn window_size(window: Window, winit_platform: WinitPlatform) -> Vec2 {
+    Vec2::new(
+        window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).width,
+        window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height
+    )
+}
 
 fn main() {
     let mut app = App::new();
@@ -31,10 +38,10 @@ fn main() {
     unsafe {
         *crate::renderer::PROJECTION_MATRIX = 
             Mat4::orthographic_rh_gl(
-            0.0, 
-            window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).width, 
-            0.0,
-            window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height, 
+            -window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).width/2.0, 
+            window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).width/2.0, 
+            -window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height/2.0,
+            window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height/2.0, 
             1000.0, 
             -1000.0
             );
@@ -132,34 +139,86 @@ fn main() {
                 }
 
                 if let Some(scene) = app.current_scene.as_ref() {
+                    for marker in scene.markers.iter() {
+                        Line::draw(
+                            ig_renderer.gl_context(), 
+                            &line_program, 
+                            Vec2::new(-20.0+marker.position[0], marker.position[1]),
+                            Vec2::new(20.0+marker.position[0], marker.position[1]),
+                            &[1.0, 0.0, 0.0, 1.0]
+                        );
+                        Line::draw(
+                            ig_renderer.gl_context(), 
+                            &line_program, 
+                            Vec2::new(marker.position[0], -20.0+marker.position[1]),
+                            Vec2::new(marker.position[0], 20.0+marker.position[1]),
+                            &[1.0, 0.0, 0.0, 1.0]
+                        );
+
+                        Line::draw(
+                            ig_renderer.gl_context(), 
+                            &line_program, 
+                            Vec2::new(-10.0+marker.position[0], -10.0+marker.position[1]),
+                            Vec2::new(10.0+marker.position[0], 10.0+marker.position[1]),
+                            &[0.0, 1.0, 0.0, 1.0]
+                        );
+                        Line::draw(
+                            ig_renderer.gl_context(), 
+                            &line_program, 
+                            Vec2::new(10.0+marker.position[0], -10.0+marker.position[1]),
+                            Vec2::new(-10.0+marker.position[0], 10.0+marker.position[1]),
+                            &[0.0, 1.0, 0.0, 1.0]
+                        );
+                    }
+
                     let sheet = scene.tile_sheets.iter()
                         .find(|&a| a.path == app.get_tile_sheet());
 
                     if let Some(sheet) = sheet {
                         let size = sheet.tile_size;
 
-                        let offset = Vec2::new(camera.x.round_ties_even().rem_euclid(size.0 as f32), camera.y.round_ties_even().rem_euclid(size.1 as f32));
-                        
-                        let w =  window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).width.abs() / size.0 as f32;
-                        let h =  (window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height.abs() / size.1 as f32) + 2.0;
+                        let mut offset = Vec2::new(camera.x.rem_euclid(size.0 as f32), camera.y.rem_euclid(size.1 as f32));
 
-                        for i in 0..(w as i32) {
+                        let w =  window_size.0 / size.0 as f32;
+                        let h =  window_size.1 / size.1 as f32;
+
+                        offset -= camera;
+
+                        for i in 0..(w as i32 * 2) {
                             Line::draw(
                                 ig_renderer.gl_context(), 
                                 &line_program, 
-                                Vec2::new( size.0 as f32 * i as f32, -(size.1 as f32)) - offset,
-                                Vec2::new( size.0 as f32 * i as f32, h * size.1 as f32) - offset
+                                Vec2::new( size.0 as f32 * (i-w as i32) as f32, -h * size.1 as f32) - offset,
+                                Vec2::new( size.0 as f32 * (i-w as i32) as f32, window_size.1) - offset,
+                                &[1.0,1.0,1.0,0.25]
                             );
                         }
 
-                        for i in 0..(h as i32) {
+                        for i in 0..(h as i32 * 2) {
+                            
                             Line::draw(
                                 ig_renderer.gl_context(), 
                                 &line_program, 
-                                Vec2::new(-(size.0 as f32), size.1 as f32 * i as f32) - offset,
-                                Vec2::new(w * size.0 as f32, size.1 as f32 * i as f32) - offset
+                                Vec2::new(-w * size.0 as f32, size.1 as f32 * (i-h as i32) as f32) - offset,
+                                Vec2::new(window_size.0, size.1 as f32 * (i-h as i32) as f32) - offset,
+                                &[1.0,1.0,1.0,0.25]
                             );
                         }
+
+                        Line::draw(
+                            ig_renderer.gl_context(), 
+                            &line_program, 
+                            Vec2::new(-10.0, 0.0),
+                            Vec2::new(10.0, 0.0),
+                            &[1.0,1.0,1.0,1.0]
+                        );
+                        Line::draw(
+                            ig_renderer.gl_context(), 
+                            &line_program, 
+                            Vec2::new(0.0, -10.0),
+                            Vec2::new(0.0, 10.0),
+                            &[1.0,1.0,1.0,1.0]
+                        );
                     }
                 }
 
@@ -256,6 +315,19 @@ fn main() {
                     .build(|| {
                         match &property_select {
                             PropertySelect::None => {}
+                            PropertySelect::Marker(marker) => {
+                                if let Some(_) = ui.tab_bar("prop_main") {
+                                    if let Some(scene) = app.current_scene.as_mut() {
+                                        if let Some(_) = ui.tab_item("Marker") {
+                                            ui.columns(1, "marker_columns", false);
+                                            if let Some(m) = scene.markers.get_mut(*marker) {
+                                                ui.input_text("Name", &mut m.name).build();
+                                                ui.input_float2("Pos", &mut m.position).build();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             PropertySelect::Tilesheet(sheet) => {
                                 if let Some(_) = ui.tab_bar("prop_main") {
                                     if let Some(_) = ui.tab_item("Tile Sheet") {
@@ -399,7 +471,6 @@ fn main() {
                                     }
                                 }
                                 sorted_scripts.sort_by(|a, b| a.1.cmp(&b.1));
-                                //ui.columns(2, "Properties", true);
                                 let mut a = -1;
                                 let mut b = -1;
                                 for ass in sorted_scripts {
@@ -493,8 +564,9 @@ fn main() {
                     .collapsible(false)
                     .build(|| {
                         if let Some(_) = ui.tab_bar("main") {
+                            if let Some(scene) = app.current_scene.as_mut() {
                             if let Some(_) = ui.tab_item("Layers") {
-                                if let Some(scene) = app.current_scene.as_mut() {
+                                
                                     if ui.button("Add") {
                                         let mut new_layer = Layer::new();
                                         new_layer.tile_sheet = app.current_tile_sheet.clone();
@@ -545,6 +617,31 @@ fn main() {
                                             }   
                                         }
                                         ui.next_column();
+                                    }
+                                    ui.columns(1, "layers_column_2", false);
+                                }
+                                if let Some(_) = ui.tab_item("Markers") {
+                                    if let Some(scene) = app.current_scene.as_mut() {
+                                        if ui.button("Add") {
+                                            scene.markers.push(Marker { position: [0.0, 0.0], name: format!("Marker {}", scene.markers.len()).to_string() });
+                                        }
+
+                                        ui.columns(2, "markers_columns", false);
+                                        let mut for_deletion = vec!();
+                                        for marker in scene.markers.iter().enumerate() {
+                                            if ui.selectable(marker.1.name.clone()) {
+                                                property_select = PropertySelect::Marker(marker.0);
+                                            }
+                                            ui.next_column();
+                                            if ui.button(format!("Delete##{}", marker.0)) {
+                                                for_deletion.push(marker.0);
+                                            }
+                                            ui.next_column();
+                                        }
+
+                                        for i in for_deletion {
+                                            scene.markers.remove(i);
+                                        }
                                     }
                                 }
                             }
@@ -668,14 +765,14 @@ fn main() {
                         Vec2::new(0.0, 0.0)
                     };
 
-                    let mouse_pos = Vec2::from_slice(&ui.io().mouse_pos)-tile_size;
+                    let mouse_pos = Vec2::from_slice(&ui.io().mouse_pos)-(tile_size);
 
                     let model = 
                     Mat4::IDENTITY * 
                     Mat4::from_scale_rotation_translation( 
                         Vec3::new(1.0, 1.0, 1.0),
                         Quat::from_rotation_z(0.0), 
-                        Vec3::new(mouse_pos.x, window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height-mouse_pos.y, 0.0)
+                        Vec3::new(mouse_pos.x-(window_size.0/2.0), (window_size.1/2.0)-mouse_pos.y, 0.0)
                     );
 
                     let view = unsafe { *crate::renderer::VIEW_MATRIX };
@@ -794,13 +891,13 @@ fn main() {
 
                 unsafe {
                     *crate::renderer::PROJECTION_MATRIX = 
-                        Mat4::orthographic_rh_gl(
-                        0.0, 
-                        window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).width, 
-                        0.0,
-                        window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height, 
-                        1000.0, 
-                        -1000.0
+                    Mat4::orthographic_rh_gl(
+                    -window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).width/2.0, 
+                    window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).width/2.0, 
+                    -window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height/2.0,
+                    window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height/2.0, 
+                    1000.0, 
+                    -1000.0
                     );
                 }
             }

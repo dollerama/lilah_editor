@@ -36,6 +36,7 @@ pub enum PropertySelect {
     None,
     Layer,
     Tilesheet(usize),
+    Marker(usize),
     Script
 }
 
@@ -98,6 +99,12 @@ pub struct Tile {
     pub position: (f32, f32)
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct Marker {
+    pub position: [f32; 2],
+    pub name: String
+}
+
 #[serde_as]
 #[derive(Serialize, Deserialize)]
 pub struct Layer {
@@ -126,7 +133,8 @@ pub struct Scene {
     pub name: String,
     pub path: String,
     pub tile_sheets: Vec<TileSheet>,
-    pub layers: Vec<Layer>
+    pub layers: Vec<Layer>,
+    pub markers: Vec<Marker>
 }
 
 impl Scene {
@@ -135,6 +143,7 @@ impl Scene {
             name: name.to_string(),
             path: path.to_string(),
             tile_sheets: Vec::new(),
+            markers: Vec::new(),
             layers: Vec::new()
         }
     }

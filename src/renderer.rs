@@ -55,9 +55,10 @@ void main() {
 pub const Line_FRAG: &'static str = r#"
 #version 330
 out vec4 FragColor;
+uniform vec4 tint;
 
 void main() {
-   FragColor = vec4(1.0, 1.0, 1.0, 0.25);
+   FragColor = tint;
 }
 "#;
 
@@ -491,11 +492,11 @@ impl Sprite {
 pub struct Line {}
 
 impl Line {
-    pub fn draw(gl: &glow::Context, program: &ShaderProgram, start: Vec2, end: Vec2) {
-        //let view = unsafe { *crate::renderer::VIEW_MATRIX };
+    pub fn draw(gl: &glow::Context, program: &ShaderProgram, start: Vec2, end: Vec2, tint: &[f32; 4]) {
+        let view = unsafe { *crate::renderer::VIEW_MATRIX };
         let projection = unsafe { *crate::renderer::PROJECTION_MATRIX };
 
-        let mvp = projection * Mat4::IDENTITY;
+        let mvp = projection * view * Mat4::IDENTITY;
 
         let (mut vao , mut vbo, mut ibo) = unsafe {
             let vao = VertexArray::new(gl);
@@ -522,6 +523,19 @@ impl Line {
             
             let mat_attr = gl.get_uniform_location(program.id, "mvp").unwrap();
             gl.uniform_matrix_4_f32_slice(Some(&mat_attr), false,  &mvp.to_cols_array());
+
+            let tint_attr = gl.get_uniform_location(
+                program.id,
+                "tint",
+            ).unwrap();
+
+            gl.uniform_4_f32(
+                Some(&tint_attr),
+                tint[0],
+                tint[1],
+                tint[2],
+                tint[3],
+            );
             
             gl.draw_elements(glow::LINES, 6, glow::UNSIGNED_INT, 0);
         }
