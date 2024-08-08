@@ -91,10 +91,14 @@ fn main() {
     };
 
     let mut camera = Vec2::new(0.0, 0.0);
+    let mut last_click = Vec2::new(0.0, 0.0);
     let mut tile_count = [0, 0];
     let mut win_size = [800f32, 600f32];
     let mut current_tile = (0u32, 0u32);
     let mut property_select = PropertySelect::None;
+    let mut marker_spr = Sprite::new("lilah__editor__internal__ignore__marker_icon.png");
+    app.load_texture_internal(ig_renderer.gl_context(), "marker_icon.png");
+    marker_spr.load(ig_renderer.gl_context(), &program, &app.textures);
 
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -130,6 +134,99 @@ fn main() {
                     }
                 }
 
+                
+
+                if let PropertySelect::Marker(marker) = property_select {
+                    if let Some(scene) = app.current_scene.as_mut() {  
+                        if let Some(marker) = scene.markers.get_mut(marker) {
+                            if ui.is_mouse_clicked(imgui::MouseButton::Left) { 
+                                let mouse_pos = Vec2::from_slice(&ui.io().mouse_pos);
+
+                                let model = 
+                                Mat4::IDENTITY * 
+                                Mat4::from_scale_rotation_translation( 
+                                    Vec3::new(1.0, 1.0, 1.0),
+                                    Quat::from_rotation_z(0.0), 
+                                    Vec3::new(mouse_pos.x-(window_size.0/2.0), (window_size.1/2.0)-mouse_pos.y, 0.0)
+                                );
+
+                                let view = unsafe { *crate::renderer::VIEW_MATRIX };
+                                let projection = unsafe { *crate::renderer::PROJECTION_MATRIX };
+
+                                let mvp =  model * view.inverse() * projection;
+                                let position_v3 = mvp.to_scale_rotation_translation().2;
+                                let position = Vec2::new(position_v3.x, position_v3.y);
+
+                                
+                                if application::aabb(
+                                    (position)-Vec2::new(3.0,-3.0), 
+                                    Vec2::new(6.0,6.0), 
+                                    Vec2::new(marker.position[0]-3.0, marker.position[1]+50.0), 
+                                    Vec2::new(6.0, 50.0)
+                                ) {
+                                    last_click = position;
+                                }
+
+                                if application::aabb(
+                                    (position)-Vec2::new(3.0,-3.0), 
+                                    Vec2::new(6.0,6.0), 
+                                    Vec2::new(marker.position[0]+14.0, marker.position[1]+3.0), 
+                                    Vec2::new(50.0, 6.0)
+                                ) {
+                                    last_click = position;
+                                }
+                            }
+
+                            if ui.is_mouse_dragging(imgui::MouseButton::Left) {
+                                let mouse_pos = Vec2::from_slice(&ui.io().mouse_pos);
+
+                                let model = 
+                                Mat4::IDENTITY * 
+                                Mat4::from_scale_rotation_translation( 
+                                    Vec3::new(1.0, 1.0, 1.0),
+                                    Quat::from_rotation_z(0.0), 
+                                    Vec3::new(mouse_pos.x-(window_size.0/2.0), (window_size.1/2.0)-mouse_pos.y, 0.0)
+                                );
+
+                                let view = unsafe { *crate::renderer::VIEW_MATRIX };
+                                let projection = unsafe { *crate::renderer::PROJECTION_MATRIX };
+
+                                let mvp =  model * view.inverse() * projection;
+                                let position_v3 = mvp.to_scale_rotation_translation().2;
+                                let position = Vec2::new(position_v3.x, position_v3.y);
+
+                                if application::aabb(
+                                    (position)-Vec2::new(10.0,-10.0), 
+                                    Vec2::new(20.0,20.0), 
+                                    Vec2::new(marker.position[0]-10.0, marker.position[1]+10.0), 
+                                    Vec2::new(20.0, 20.0)
+                                ) {
+                                    marker.position[0] = position.x;
+                                    marker.position[1] = position.y;
+                                }
+
+                                // if application::aabb(
+                                //     (position)+Vec2::new(-5.0,5.0), 
+                                //     Vec2::new(10.0,10.0), 
+                                //     Vec2::new(marker.position[0]-5.0, marker.position[1]+50.0), 
+                                //     Vec2::new(10.0, 50.0)
+                                // ) {
+                                //     marker.position[1] = position.y;//-last_click.y;
+                                // }
+
+                                // if application::aabb(
+                                //     (position)+Vec2::new(-5.0,5.0), 
+                                //     Vec2::new(10.0,10.0), 
+                                //     Vec2::new(marker.position[0]+14.0, marker.position[1]+5.0), 
+                                //     Vec2::new(50.0, 10.0)
+                                // ) {
+                                //     marker.position[0] = position.x;//-last_click.x;
+                                // }
+                            }
+                        }
+                    }
+                }
+
                 unsafe { ig_renderer.gl_context().clear(glow::COLOR_BUFFER_BIT) };
 
                 for sprs in &app.sprite_buffer {
@@ -139,36 +236,28 @@ fn main() {
                 }
 
                 if let Some(scene) = app.current_scene.as_ref() {
-                    for marker in scene.markers.iter() {
-                        Line::draw(
-                            ig_renderer.gl_context(), 
-                            &line_program, 
-                            Vec2::new(-20.0+marker.position[0], marker.position[1]),
-                            Vec2::new(20.0+marker.position[0], marker.position[1]),
-                            &[1.0, 0.0, 0.0, 1.0]
-                        );
-                        Line::draw(
-                            ig_renderer.gl_context(), 
-                            &line_program, 
-                            Vec2::new(marker.position[0], -20.0+marker.position[1]),
-                            Vec2::new(marker.position[0], 20.0+marker.position[1]),
-                            &[1.0, 0.0, 0.0, 1.0]
-                        );
+                    for marker in scene.markers.iter().enumerate() {
+                        marker_spr.position = Vec2::new(marker.1.position[0], marker.1.position[1]+30.0);
+                        marker_spr.draw(ig_renderer.gl_context(), &program, &app.textures);
+                        if let PropertySelect::Marker(m) = property_select {
+                            if m == marker.0 {
+                                Line::draw(
+                                    ig_renderer.gl_context(), 
+                                    &line_program, 
+                                    Vec2::new(marker.1.position[0], marker.1.position[1]),
+                                    Vec2::new(marker.1.position[0], marker.1.position[1]+64.0),
+                                    &[0.0,1.0,0.0,1.0]
+                                );
 
-                        Line::draw(
-                            ig_renderer.gl_context(), 
-                            &line_program, 
-                            Vec2::new(-10.0+marker.position[0], -10.0+marker.position[1]),
-                            Vec2::new(10.0+marker.position[0], 10.0+marker.position[1]),
-                            &[0.0, 1.0, 0.0, 1.0]
-                        );
-                        Line::draw(
-                            ig_renderer.gl_context(), 
-                            &line_program, 
-                            Vec2::new(10.0+marker.position[0], -10.0+marker.position[1]),
-                            Vec2::new(-10.0+marker.position[0], 10.0+marker.position[1]),
-                            &[0.0, 1.0, 0.0, 1.0]
-                        );
+                                Line::draw(
+                                    ig_renderer.gl_context(), 
+                                    &line_program, 
+                                    Vec2::new(marker.1.position[0], marker.1.position[1]),
+                                    Vec2::new(marker.1.position[0]+64.0, marker.1.position[1]),
+                                    &[1.0,0.0,0.0,1.0]
+                                );
+                            }
+                        }
                     }
 
                     let sheet = scene.tile_sheets.iter()
@@ -177,7 +266,7 @@ fn main() {
                     if let Some(sheet) = sheet {
                         let size = sheet.tile_size;
 
-                        let mut offset = Vec2::new(camera.x.rem_euclid(size.0 as f32), camera.y.rem_euclid(size.1 as f32));
+                        let mut offset = Vec2::new(camera.x.rem_euclid(size.0 as f32)-(size.0 as f32/2.0), camera.y.rem_euclid(size.1 as f32)-(size.1 as f32/2.0));
 
                         let w =  window_size.0 / size.0 as f32;
                         let h =  window_size.1 / size.1 as f32;
@@ -333,6 +422,7 @@ fn main() {
                                     if let Some(_) = ui.tab_item("Tile Sheet") {
                                         if let Some(scene) = app.current_scene.as_mut() {
                                             if let Some(tilesheet) = scene.tile_sheets.get_mut(*sheet) {
+                                                ui.text(format!("{}", tilesheet.filename));
                                                 if ui.input_int2("Tiles", &mut tile_count).build() {
                                                     if tile_count[0] != 0 && tile_count[1] != 0 {
                                                         tilesheet.tile_size = (
@@ -715,14 +805,14 @@ fn main() {
                                     app.config.assets.remove(&rem);
                                 }
                             }
-                            if let Some(scene) = app.current_scene.as_ref() {
-                                if let Some(_) = ui.tab_item(format!("World > {}", scene.name)) {
+                            if let Some(scene) = app.current_scene.as_mut() {
+                                if let Some(_) = ui.tab_item(format!("World:{}", scene.name)) {
                                     if let Some(_) = ui.tab_bar("world") {
                                         if let Some(_) = ui.tab_item("Tile Sheets") {
                                             let mut to_remove = vec!();
                                             ui.columns(2, "layers_column", false);
-                                            for tex in app.textures.keys().enumerate() {
-                                                if ui.selectable(tex.1) {
+                                            for tex in scene.tile_sheets.iter().enumerate() {
+                                                if ui.selectable(format!("{}##{}", tex.1.filename, tex.0)) {
                                                     property_select = PropertySelect::Tilesheet(tex.0);
                                                     if let Some(tilesheet) = scene.tile_sheets.get(tex.0) {
                                                         tile_count = [
@@ -733,14 +823,14 @@ fn main() {
                                                 }
                                                 ui.next_column();
                                                 if ui.button("Remove") {
-                                                    to_remove.push(tex.1.clone());
+                                                    to_remove.push(tex.0);
                                                 }
                                                 ui.next_column();
                                                 ui.separator();
                                             }
 
                                             for i in to_remove {
-                                                app.textures.remove(&i);
+                                                scene.tile_sheets.remove(i);
                                             }
                                         }
                                     }
@@ -751,52 +841,52 @@ fn main() {
                 }
 
                 let new_tile = if let Some(_) = app.current_scene.as_ref() {
-                    let tile_size = if let Some(scene) = app.current_scene.as_ref() {
-                        let sheet = scene.tile_sheets.iter().find(
-                            |&a| a.path == app.get_tile_sheet()
-                        );
-                            
-                        if let Some(sheet) = sheet {
-                            Vec2::new(sheet.tile_size.0 as f32/2.0, sheet.tile_size.1 as f32/2.0)
+                    if let PropertySelect::Marker(_) = property_select {
+                        None
+                    } else {
+                        let tile_size = if let Some(scene) = app.current_scene.as_ref() {
+                            let sheet = scene.tile_sheets.iter().find(
+                                |&a| a.path == app.get_tile_sheet()
+                            );
+                                
+                            if let Some(sheet) = sheet {
+                                Vec2::new(sheet.tile_size.0 as f32/2.0, sheet.tile_size.1 as f32/2.0)
+                            } else {
+                                Vec2::new(0.0, 0.0)
+                            }
                         } else {
                             Vec2::new(0.0, 0.0)
-                        }
-                    } else {
-                        Vec2::new(0.0, 0.0)
-                    };
+                        };
 
-                    let mouse_pos = Vec2::from_slice(&ui.io().mouse_pos)-(tile_size);
+                        let mouse_pos = Vec2::from_slice(&ui.io().mouse_pos);//-(tile_size);
 
-                    let model = 
-                    Mat4::IDENTITY * 
-                    Mat4::from_scale_rotation_translation( 
-                        Vec3::new(1.0, 1.0, 1.0),
-                        Quat::from_rotation_z(0.0), 
-                        Vec3::new(mouse_pos.x-(window_size.0/2.0), (window_size.1/2.0)-mouse_pos.y, 0.0)
-                    );
+                        let model = 
+                        Mat4::IDENTITY * 
+                        Mat4::from_scale_rotation_translation( 
+                            Vec3::new(1.0, 1.0, 1.0),
+                            Quat::from_rotation_z(0.0), 
+                            Vec3::new(mouse_pos.x-(window_size.0/2.0), (window_size.1/2.0)-mouse_pos.y, 0.0)
+                        );
 
-                    let view = unsafe { *crate::renderer::VIEW_MATRIX };
-                    let projection = unsafe { *crate::renderer::PROJECTION_MATRIX };
+                        let view = unsafe { *crate::renderer::VIEW_MATRIX };
+                        let projection = unsafe { *crate::renderer::PROJECTION_MATRIX };
 
-                    let mvp =  model * view.inverse() * projection;
-                    let position = mvp.to_scale_rotation_translation().2;
-                    
-                    if !ui_hovered && !ui.is_key_down(imgui::Key::Space) {
-                        if ui.is_mouse_down(imgui::MouseButton::Left) {
-                            Some((position, true))
-                        }
-                        else if ui.is_mouse_down(imgui::MouseButton::Right) {
-                            Some((position, false))
-                        }
-                        else {
+                        let mvp =  model * view.inverse() * projection;
+                        let position = mvp.to_scale_rotation_translation().2;
+                        
+                        if !ui_hovered && !ui.is_key_down(imgui::Key::Space) {
+                            if ui.is_mouse_down(imgui::MouseButton::Left) {
+                                Some((position, true))
+                            } else if ui.is_mouse_down(imgui::MouseButton::Right) {
+                                Some((position, false))
+                            } else {
+                                None
+                            }
+                        } else {
                             None
                         }
                     }
-                    else {
-                        None
-                    }
-                }
-                else {
+                } else {
                     None
                 };
 

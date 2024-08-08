@@ -1,13 +1,10 @@
 extern crate pathdiff;
-use glam::{Mat4, Vec3, Vec2};
-use imgui::{FontId, FontConfig, ProgressBar};
+use glam::Vec2;
 use serde::{Deserialize, Serialize};
-use std::{time::{Instant, Duration}, process::{Command, Stdio}, path::{Path, PathBuf}, fs::{File, self}, io::BufReader, thread, collections::HashMap, alloc::System};
+use std::{collections::HashMap, fs, path::Path, process::Command, thread, time::Duration};
 use rfd::FileDialog;
-use glow::{HasContext, ALWAYS, Shader};
-use glutin::{event_loop::EventLoop, WindowedContext, dpi::{self, PhysicalSize}};
-use imgui_winit_support::WinitPlatform;
 use serde_with::serde_as;
+use indexmap::IndexMap;
 
 use crate::renderer::{LilahTexture, Sprite, ShaderProgram};
 
@@ -152,7 +149,7 @@ impl Scene {
 pub struct App {
     pub config: Config,
     pub current_project: String,
-    pub textures: HashMap<String, LilahTexture>,
+    pub textures: IndexMap<String, LilahTexture>,
     pub current_tile_sheet: String,
     pub current_scene: Option<Scene>,
     pub current_layer: usize,
@@ -164,7 +161,7 @@ impl App {
         Self {
             config: Config::new(),
             current_project: String::from(""),
-            textures: HashMap::new(),
+            textures: IndexMap::new(),
             current_tile_sheet: String::from(""),
             current_scene: None,
             sprite_buffer: Vec::new(),
@@ -174,6 +171,27 @@ impl App {
 
     pub fn get_tile_sheet(&self) -> String {
         self.current_tile_sheet.clone()
+    }
+
+    pub fn load_texture_internal(&mut self, gl: &glow::Context, file : &str) {
+        let mut new_texture = unsafe { 
+            LilahTexture::new(gl) 
+        };
+
+        unsafe {
+            new_texture.set_wrapping(gl, glow::REPEAT as i32);
+            new_texture.set_filtering(gl, glow::LINEAR as i32);
+        }
+
+        unsafe {
+            if let Err(e) = new_texture.load(gl, &Path::new(file)) {
+                eprintln!("{}", e);
+            }
+        }
+
+        //let file = String::from(Path::new(file).file_name().unwrap().to_str().unwrap());
+
+        self.textures.insert(format!("lilah__editor__internal__ignore__{}", file), new_texture);
     }
 
     pub fn load_texture(&mut self, gl: &glow::Context, file : &str) {
@@ -222,7 +240,7 @@ impl App {
             let file_path_str = file.as_path().to_str().unwrap();
             let path = Path::new(file_path_str);
             let relative_path_to = pathdiff::diff_paths(path, path_base).unwrap();
-            let file_path = relative_path_to.as_path();
+            let _file_path = relative_path_to.as_path();
 
             match fs::read(file) {
                 Ok(v) => {
@@ -599,4 +617,23 @@ impl App {
             }
         }
     }
+}
+
+pub fn aabb(a_pos: Vec2, a_size: Vec2, b_pos: Vec2, b_size: Vec2) -> bool {
+    //The sides of the rectangles
+    let left_a = a_pos.x;
+    let left_b = b_pos.x;
+    let right_a = left_a + a_size.x;
+    let right_b = left_b + b_size.x;
+    let top_a = a_pos.y;
+    let top_b = b_pos.y;
+    let bottom_a = top_a - a_size.y;
+    let bottom_b = top_b - b_size.y;
+
+    //If any of the sides from A are outside of B
+    if bottom_a <= top_b && top_a >= bottom_b && right_a >= left_b && left_a <= right_b {
+        return true;
+    }
+
+    false
 }

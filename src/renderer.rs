@@ -3,6 +3,7 @@ use std::{path::Path, ffi::{CString, NulError}, ptr, string::FromUtf8Error, coll
 use glam::{Vec2, Vec3, Quat, Mat4};
 use glow::{HasContext, ALWAYS, NativeTexture, NativeProgram};
 use image::{ImageError, EncodableLayout, DynamicImage, Rgba};
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use lazy_mut::lazy_mut;
@@ -370,7 +371,7 @@ impl Sprite {
         }
     }
 
-    pub fn load(&mut self, gl: &glow::Context, program: &ShaderProgram, textures: &HashMap<String, LilahTexture>) {
+    pub fn load(&mut self, gl: &glow::Context, program: &ShaderProgram, textures: &IndexMap<String, LilahTexture>) {
         let (vao , vbo) = unsafe {
             let vao = VertexArray::new(gl);
             vao.bind(gl);
@@ -453,7 +454,7 @@ impl Sprite {
         }
     }
 
-    pub fn draw(&self, gl: &glow::Context, program: &ShaderProgram, textures: &HashMap<String, LilahTexture>) {
+    pub fn draw(&self, gl: &glow::Context, program: &ShaderProgram, textures: &IndexMap<String, LilahTexture>) {
         if !self.visible {
             return;
         }
@@ -463,7 +464,7 @@ impl Sprite {
         Mat4::from_scale_rotation_translation( 
             Vec3::new(self.get_size().0 as f32, self.get_size().1 as f32, 1.0),
             Quat::from_rotation_z(0.0), 
-            Vec3::new(self.position.x + (self.get_size().0/2) as f32, self.position.y - (self.get_size().1/2) as f32, 0.0)
+            Vec3::new(self.position.x, self.position.y, 0.0)
         );
 
         let view = unsafe { *crate::renderer::VIEW_MATRIX };
