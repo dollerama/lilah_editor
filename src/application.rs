@@ -274,8 +274,13 @@ impl App {
                 
                 for i in tiles {
                     let mut new_spr = Sprite::new(&i.1.1.sheet);
+                    let sheet = scene.tile_sheets.iter()
+                        .find(|&a| a.path == i.1.1.sheet);
+
                     new_spr.load(gl, &program, &self.textures);
-                    new_spr.cut_sprite_sheet(0, 0, 3, 3);
+                    if let Some(sheet) = sheet {
+                        new_spr.cut_sprite_sheet(0, 0, sheet.get_num_of_tiles().0, sheet.get_num_of_tiles().1);
+                    }
                     new_spr.anim_sprite_sheet(
                         gl, 
                         &program,  

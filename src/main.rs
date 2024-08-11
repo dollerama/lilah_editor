@@ -91,6 +91,7 @@ fn main() {
     };
 
     let mut camera = Vec2::new(0.0, 0.0);
+    let mut camera_zoom = 1.0;
     let mut last_click = Vec2::new(0.0, 0.0);
     let mut tile_count = [0, 0];
     let mut win_size = [800f32, 600f32];
@@ -99,6 +100,36 @@ fn main() {
     let mut marker_spr = Sprite::new("lilah__editor__internal__ignore__marker_icon.png");
     app.load_texture_internal(ig_renderer.gl_context(), "marker_icon.png");
     marker_spr.load(ig_renderer.gl_context(), &program, &app.textures);
+
+    let yellow = [1.0, 0.886, 0.482,1.0];
+    let light_yellow = [1.0, 0.933, 0.698,1.0];
+    let dark_yellow = [0.478, 0.455, 0.361,1.0];
+    let light_dark_yellow = [0.639, 0.608, 0.486, 1.0];
+    
+    imgui_context.style_mut().colors[imgui::StyleColor::Button as usize] = dark_yellow;
+    imgui_context.style_mut().colors[imgui::StyleColor::ButtonHovered as usize] = light_dark_yellow;
+
+    imgui_context.style_mut().colors[imgui::StyleColor::Tab as usize] = dark_yellow;
+    imgui_context.style_mut().colors[imgui::StyleColor::TabActive as usize] = [0.341, 0.306, 0.23, 1.0];
+    imgui_context.style_mut().colors[imgui::StyleColor::TabHovered as usize] = dark_yellow;
+
+    imgui_context.style_mut().colors[imgui::StyleColor::ChildBg as usize] = [0.259, 0.255, 0.239, 0.5];
+    imgui_context.style_mut().colors[imgui::StyleColor::FrameBg as usize] = [0.259, 0.255, 0.2393, 0.5];
+
+    imgui_context.style_mut().colors[imgui::StyleColor::CheckMark as usize] = light_dark_yellow;
+
+    imgui_context.style_mut().colors[imgui::StyleColor::Text as usize] = [0.1,0.1,0.1,1.0];
+
+    imgui_context.style_mut().colors[imgui::StyleColor::MenuBarBg as usize] = yellow;
+    imgui_context.style_mut().colors[imgui::StyleColor::HeaderHovered as usize] = light_yellow;
+    imgui_context.style_mut().colors[imgui::StyleColor::HeaderActive as usize] = light_yellow;
+
+    imgui_context.style_mut().colors[imgui::StyleColor::PopupBg as usize] = [1.0,1.0,1.0,1.0];
+
+    imgui_context.style_mut().colors[imgui::StyleColor::WindowBg as usize] = [0.129, 0.129, 0.125, 0.9];
+    imgui_context.style_mut().colors[imgui::StyleColor::TitleBg as usize] = light_yellow;
+    imgui_context.style_mut().colors[imgui::StyleColor::TitleBgActive as usize] = light_yellow;
+
 
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -122,7 +153,7 @@ fn main() {
                     window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).width,
                     window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).height
                 );
-                
+
                 if ui.is_key_down(imgui::Key::Space) {
                     let drag = ui.mouse_drag_delta_with_button(imgui::MouseButton::Left);
                     if Vec2::new(-drag[0], drag[1]).length() > 0.5f32 {
@@ -134,7 +165,18 @@ fn main() {
                     }
                 }
 
-                
+                // let prev_zoom = camera_zoom;
+                // camera_zoom += ui.io().mouse_wheel*0.05;
+                // if prev_zoom != camera_zoom {
+                //     unsafe {
+                //         *crate::renderer::VIEW_MATRIX = 
+                //         Mat4::from_scale_rotation_translation(
+                //             Vec3::ONE*camera_zoom,
+                //             Quat::from_rotation_z(0.0),
+                //             Vec3::new(-camera.x, -camera.y, 0.0)
+                //         );
+                //     }
+                // }
 
                 if let PropertySelect::Marker(marker) = property_select {
                     if let Some(scene) = app.current_scene.as_mut() {  
@@ -204,24 +246,6 @@ fn main() {
                                     marker.position[0] = position.x;
                                     marker.position[1] = position.y;
                                 }
-
-                                // if application::aabb(
-                                //     (position)+Vec2::new(-5.0,5.0), 
-                                //     Vec2::new(10.0,10.0), 
-                                //     Vec2::new(marker.position[0]-5.0, marker.position[1]+50.0), 
-                                //     Vec2::new(10.0, 50.0)
-                                // ) {
-                                //     marker.position[1] = position.y;//-last_click.y;
-                                // }
-
-                                // if application::aabb(
-                                //     (position)+Vec2::new(-5.0,5.0), 
-                                //     Vec2::new(10.0,10.0), 
-                                //     Vec2::new(marker.position[0]+14.0, marker.position[1]+5.0), 
-                                //     Vec2::new(50.0, 10.0)
-                                // ) {
-                                //     marker.position[0] = position.x;//-last_click.x;
-                                // }
                             }
                         }
                     }
@@ -402,6 +426,12 @@ fn main() {
                     .resizable(false)
                     .collapsible(false)
                     .build(|| {
+                        let mut text_color = ui.push_style_color(imgui::StyleColor::Text, [1.0,1.0,1.0,1.0]);
+                        let mut hover_color = ui.push_style_color(imgui::StyleColor::HeaderHovered, [1.0,1.0,1.0,0.35]);
+                        let mut active_hover_color = ui.push_style_color(imgui::StyleColor::HeaderActive, [1.0,1.0,1.0,0.5]);
+
+                        ui_hovered = ui.is_any_item_hovered() || ui.is_window_hovered();
+
                         match &property_select {
                             PropertySelect::None => {}
                             PropertySelect::Marker(marker) => {
@@ -638,6 +668,9 @@ fn main() {
                                 }
                             }
                        }
+                       text_color.pop();
+                       hover_color.pop();
+                       active_hover_color.pop();
                     });
 
                     ui.window("Hierarchy")
@@ -653,6 +686,12 @@ fn main() {
                     .resizable(false)
                     .collapsible(false)
                     .build(|| {
+                        let mut text_color = ui.push_style_color(imgui::StyleColor::Text, [1.0,1.0,1.0,1.0]);
+                        let mut hover_color = ui.push_style_color(imgui::StyleColor::HeaderHovered, [1.0,1.0,1.0,0.35]);
+                        let mut active_hover_color = ui.push_style_color(imgui::StyleColor::HeaderActive, [1.0,1.0,1.0,0.5]);
+
+                        ui_hovered = ui.is_any_item_hovered() || ui.is_window_hovered();
+
                         if let Some(_) = ui.tab_bar("main") {
                             if let Some(scene) = app.current_scene.as_mut() {
                             if let Some(_) = ui.tab_item("Layers") {
@@ -736,6 +775,9 @@ fn main() {
                                 }
                             }
                         }
+                        text_color.pop();
+                        hover_color.pop();
+                        active_hover_color.pop();
                     });
                     ui.window("Assets")
                     .size(
@@ -750,6 +792,10 @@ fn main() {
                     .collapsible(false)
                     .resizable(false)
                     .build(|| {
+                        let mut text_color = ui.push_style_color(imgui::StyleColor::Text, [1.0,1.0,1.0,1.0]);
+                        let mut hover_color = ui.push_style_color(imgui::StyleColor::HeaderHovered, [1.0,1.0,1.0,0.35]);
+                        let mut active_hover_color = ui.push_style_color(imgui::StyleColor::HeaderActive, [1.0,1.0,1.0,0.5]);
+
                         ui_hovered = ui.is_any_item_hovered() || ui.is_window_hovered();
 
                         if let Some(_) = ui.tab_bar("main") {
@@ -772,7 +818,7 @@ fn main() {
                                 
                                     if ui.is_item_hovered() {
                                         ui.tooltip(|| {
-                                            ui.text_colored([1.0, 1.0, 1.0, 1.0], format!("{:#?}", asset.1.load_type))
+                                            ui.text_colored([0.0, 0.0, 0.0, 1.0], format!("{:#?}", asset.1.load_type))
                                         });
                                     }
 
@@ -837,8 +883,13 @@ fn main() {
                                 }
                             }
                         }
+                        text_color.pop();
+                        hover_color.pop();
+                        active_hover_color.pop();
                     });
                 }
+
+                println!("{}", ui.is_mouse_hovering_rect([175.0, 0.000], [window_size.0, window_size.1]));
 
                 let new_tile = if let Some(_) = app.current_scene.as_ref() {
                     if let PropertySelect::Marker(_) = property_select {
