@@ -108,21 +108,26 @@ fn main() {
     
     imgui_context.style_mut().colors[imgui::StyleColor::Button as usize] = dark_yellow;
     imgui_context.style_mut().colors[imgui::StyleColor::ButtonHovered as usize] = light_dark_yellow;
+    imgui_context.style_mut().colors[imgui::StyleColor::ButtonActive as usize] = [0.78, 0.682, 0.333, 1.0];
 
     imgui_context.style_mut().colors[imgui::StyleColor::Tab as usize] = dark_yellow;
-    imgui_context.style_mut().colors[imgui::StyleColor::TabActive as usize] = [0.341, 0.306, 0.23, 1.0];
-    imgui_context.style_mut().colors[imgui::StyleColor::TabHovered as usize] = dark_yellow;
+    imgui_context.style_mut().colors[imgui::StyleColor::TabHovered as usize] = [0.78, 0.682, 0.333, 1.0];
+    imgui_context.style_mut().colors[imgui::StyleColor::TabActive as usize] = [0.72, 0.632, 0.28, 1.0];
 
     imgui_context.style_mut().colors[imgui::StyleColor::ChildBg as usize] = [0.259, 0.255, 0.239, 0.5];
+    imgui_context.style_mut().colors[imgui::StyleColor::FrameBgActive as usize] = light_dark_yellow;
+    imgui_context.style_mut().colors[imgui::StyleColor::FrameBgHovered as usize] = light_dark_yellow;
     imgui_context.style_mut().colors[imgui::StyleColor::FrameBg as usize] = [0.259, 0.255, 0.2393, 0.5];
 
-    imgui_context.style_mut().colors[imgui::StyleColor::CheckMark as usize] = light_dark_yellow;
+    imgui_context.style_mut().colors[imgui::StyleColor::CheckMark as usize] = [1.0,1.0,1.0,1.0];
 
     imgui_context.style_mut().colors[imgui::StyleColor::Text as usize] = [0.1,0.1,0.1,1.0];
 
     imgui_context.style_mut().colors[imgui::StyleColor::MenuBarBg as usize] = yellow;
     imgui_context.style_mut().colors[imgui::StyleColor::HeaderHovered as usize] = light_yellow;
     imgui_context.style_mut().colors[imgui::StyleColor::HeaderActive as usize] = light_yellow;
+
+    imgui_context.style_mut().colors[imgui::StyleColor::TextSelectedBg as usize] = dark_yellow;
 
     imgui_context.style_mut().colors[imgui::StyleColor::PopupBg as usize] = [1.0,1.0,1.0,1.0];
 
@@ -147,7 +152,6 @@ fn main() {
                 window.window().request_redraw();
             }
             glutin::event::Event::RedrawRequested(_) => {
-                let mut ui_hovered: bool = false;
                 let ui = imgui_context.frame();
                 let window_size = (
                     window.window().inner_size().to_logical::<f32>(winit_platform.hidpi_factor()).width,
@@ -391,8 +395,12 @@ fn main() {
                     if open_window_size {
                         ui.open_popup("Window Size");
                     }
+                    
+                    
+                    let win_color = ui.push_style_color(imgui::StyleColor::PopupBg, [0.129, 0.129, 0.125, 0.9]);
 
                     if let Some(_) = ui.modal_popup_config("Window Size").always_auto_resize(true).begin_popup() {
+                        let text_color = ui.push_style_color(imgui::StyleColor::Text, [1.0,1.0,1.0,1.0]);
                         ui.input_float2("width : height", &mut win_size).build();
 
                         ui.columns(2, "win_size_exit", false);
@@ -407,7 +415,10 @@ fn main() {
                             ui.close_current_popup();
                         }
                         ui.next_column();
+                        text_color.pop();
                     }
+
+                    win_color.pop();
                                     
                     main_menu.end();
                 }
@@ -429,8 +440,6 @@ fn main() {
                         let mut text_color = ui.push_style_color(imgui::StyleColor::Text, [1.0,1.0,1.0,1.0]);
                         let mut hover_color = ui.push_style_color(imgui::StyleColor::HeaderHovered, [1.0,1.0,1.0,0.35]);
                         let mut active_hover_color = ui.push_style_color(imgui::StyleColor::HeaderActive, [1.0,1.0,1.0,0.5]);
-
-                        ui_hovered = ui.is_any_item_hovered() || ui.is_window_hovered();
 
                         match &property_select {
                             PropertySelect::None => {}
@@ -476,7 +485,7 @@ fn main() {
                                                 ui.next_column();
                                                 if let Some(tilesheet) = scene.tile_sheets.get(layer.current_tile_item as usize) {
                                                     if ui.button(&tilesheet.filename) {
-                                                        ui.open_popup("TileSheetPopup")
+                                                        ui.open_popup("TileSheetPopup");                                                        
                                                     }
                                                 }
                                                 ui.next_column();
@@ -493,6 +502,7 @@ fn main() {
                                                 }
                                                 ui.next_column();
 
+                                                let win_color = ui.push_style_color(imgui::StyleColor::PopupBg, [0.129, 0.129, 0.125, 0.9]);
                                                 if let Some(_) = ui.begin_popup("TileSheetPopup") { 
                                                     let list = scene.tile_sheets.iter().map(|TileSheet { ref filename, .. }| filename.as_str()).collect::<Vec<&str>>();
                                                     let list2 = scene.tile_sheets.iter().map(|TileSheet { ref path, .. }| path.as_str()).collect::<Vec<&str>>();
@@ -512,6 +522,7 @@ fn main() {
                                                         ui.close_current_popup();
                                                     }
                                                 }
+                                                win_color.pop();
                                             }
                                         }
                                     }
@@ -690,8 +701,6 @@ fn main() {
                         let mut hover_color = ui.push_style_color(imgui::StyleColor::HeaderHovered, [1.0,1.0,1.0,0.35]);
                         let mut active_hover_color = ui.push_style_color(imgui::StyleColor::HeaderActive, [1.0,1.0,1.0,0.5]);
 
-                        ui_hovered = ui.is_any_item_hovered() || ui.is_window_hovered();
-
                         if let Some(_) = ui.tab_bar("main") {
                             if let Some(scene) = app.current_scene.as_mut() {
                             if let Some(_) = ui.tab_item("Layers") {
@@ -792,11 +801,9 @@ fn main() {
                     .collapsible(false)
                     .resizable(false)
                     .build(|| {
-                        let mut text_color = ui.push_style_color(imgui::StyleColor::Text, [1.0,1.0,1.0,1.0]);
-                        let mut hover_color = ui.push_style_color(imgui::StyleColor::HeaderHovered, [1.0,1.0,1.0,0.35]);
-                        let mut active_hover_color = ui.push_style_color(imgui::StyleColor::HeaderActive, [1.0,1.0,1.0,0.5]);
-
-                        ui_hovered = ui.is_any_item_hovered() || ui.is_window_hovered();
+                        let text_color = ui.push_style_color(imgui::StyleColor::Text, [1.0,1.0,1.0,1.0]);
+                        let hover_color = ui.push_style_color(imgui::StyleColor::HeaderHovered, [1.0,1.0,1.0,0.35]);
+                        let active_hover_color = ui.push_style_color(imgui::StyleColor::HeaderActive, [1.0,1.0,1.0,0.5]);
 
                         if let Some(_) = ui.tab_bar("main") {
                             if let Some(_) = ui.tab_item("Project") {
@@ -822,6 +829,7 @@ fn main() {
                                         });
                                     }
 
+                                    let win_color = ui.push_style_color(imgui::StyleColor::PopupBg, [0.129, 0.129, 0.125, 0.9]);
                                     if let Some(_) = ui.begin_popup(asset.0) {
                                         ui.input_int2("Tile Count", &mut tile_count).build();
                                         if ui.button("Add Tilesheet") {
@@ -829,6 +837,7 @@ fn main() {
                                             ui.close_current_popup();
                                         }
                                     }
+                                    win_color.pop();
 
                                     if ui.button(format!("Remove##{}", asset.0.clone())) {
                                         to_remove.push(asset.0.clone());
@@ -889,27 +898,11 @@ fn main() {
                     });
                 }
 
-                println!("{}", ui.is_mouse_hovering_rect([175.0, 0.000], [window_size.0, window_size.1]));
-
                 let new_tile = if let Some(_) = app.current_scene.as_ref() {
                     if let PropertySelect::Marker(_) = property_select {
                         None
                     } else {
-                        let tile_size = if let Some(scene) = app.current_scene.as_ref() {
-                            let sheet = scene.tile_sheets.iter().find(
-                                |&a| a.path == app.get_tile_sheet()
-                            );
-                                
-                            if let Some(sheet) = sheet {
-                                Vec2::new(sheet.tile_size.0 as f32/2.0, sheet.tile_size.1 as f32/2.0)
-                            } else {
-                                Vec2::new(0.0, 0.0)
-                            }
-                        } else {
-                            Vec2::new(0.0, 0.0)
-                        };
-
-                        let mouse_pos = Vec2::from_slice(&ui.io().mouse_pos);//-(tile_size);
+                        let mouse_pos = Vec2::from_slice(&ui.io().mouse_pos);
 
                         let model = 
                         Mat4::IDENTITY * 
@@ -925,7 +918,7 @@ fn main() {
                         let mvp =  model * view.inverse() * projection;
                         let position = mvp.to_scale_rotation_translation().2;
                         
-                        if !ui_hovered && !ui.is_key_down(imgui::Key::Space) {
+                        if !ui.io().want_capture_mouse && !ui.is_key_down(imgui::Key::Space) {
                             if ui.is_mouse_down(imgui::MouseButton::Left) {
                                 Some((position, true))
                             } else if ui.is_mouse_down(imgui::MouseButton::Right) {
